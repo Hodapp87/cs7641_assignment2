@@ -33,8 +33,7 @@ object RandomizedOptimization {
   def main(args: Array[String]) {
 
     // Faults data is tab-separated:
-    println("Faults:")
-
+    println(s"Reading $faultsFile:")
     val faults = tabReader(faultsFile).all().map( row => {
       // 27 float fields & 7 integer (binary) fields:
       val input = row.slice(0, 26).map( x => x.toDouble )
@@ -44,18 +43,23 @@ object RandomizedOptimization {
       inst.setLabel(new shared.Instance(output.toArray))
       inst
     })
+    val faultRows = faults.size
+    println(f"Read $faultRows%d rows.")
 
     // Letter recognition is normal CSV:
-    println("letter-recognition:")
-    for (row <- CSVReader.open("letter-recognition.data")) {
+    println(s"Reading $lettersFile:")
+    val letters = CSVReader.open(lettersFile).all().map( row => {
       // First field is a single character:
-      val output = row(0)(0);
-      // Next 16 fields are all integers:
-      val input = row.slice(1, 16).map( x => x.toInt );
-
-      println (input)
-      println (output)
-    }
+      // val output = row(0)(0);
+      // This needs to be a double for an Instance.
+      // Next 16 fields are all integers but we need doubles:
+      val input = row.slice(1, 16).map( x => x.toDouble );
+      val inst = new shared.Instance(input.toArray)
+      // inst.setLabel(new shared.Instance(output.toArray))
+      inst
+    })
+    val lettersRows = letters.size
+    println(f"Read $lettersRows%d rows.")
   }
 
 }
