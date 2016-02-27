@@ -20,6 +20,9 @@ import util.linalg.Vector
 
 object RandomizedOptimization {
 
+  val faultsFile = "Faults.NNA"
+  val lettersFile = "letter-recognition.data"
+
   def tabReader(fname : String) : CSVReader = {
     implicit object TabFormat extends DefaultCSVFormat {
       override val delimiter = '\t'
@@ -31,14 +34,16 @@ object RandomizedOptimization {
 
     // Faults data is tab-separated:
     println("Faults:")
-    for (row <- tabReader("Faults.NNA")) {
-      // 27 float fields & 7 integer (binary) fields:
-      val input = row.slice(0, 26).map( x => x.toDouble );
-      val output = row.slice(27, 33).map( x => x.toInt );
 
-      println (input)
-      println (output)
-    }
+    val faults = tabReader(faultsFile).all().map( row => {
+      // 27 float fields & 7 integer (binary) fields:
+      val input = row.slice(0, 26).map( x => x.toDouble )
+      // This is actually an integer:
+      val output = row.slice(27, 33).map( x => x.toDouble )
+      val inst = new shared.Instance(input.toArray)
+      inst.setLabel(new shared.Instance(output.toArray))
+      inst
+    })
 
     // Letter recognition is normal CSV:
     println("letter-recognition:")
