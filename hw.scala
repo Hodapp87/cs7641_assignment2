@@ -64,13 +64,15 @@ object RandomizedOptimization {
     println(f"Read $faultRows%d rows.")
     val faultSet = new DataSet(faults.toArray)
     // Problem(ish): I need 'prob' to train, and 'net' to test later on.
-    val (net, prob) = getNeuralNet(faultSet, List(27, 7, 7))
+    val (net, prob) = getNeuralNet(faultSet, List(27, 10, 7))
 
-    val rhc = new RandomizedHillClimbing(prob)
-    for (i <- 1 to 1000) {
+    //val rhc = new RandomizedHillClimbing(prob)
+    val sa = new SimulatedAnnealing(1e11, 0.975, prob)
+    var errBest = 100.0
+    for (i <- 1 to 500) {
       // Iterate (mutating everything):
-      rhc.train()
-      val opt = rhc.getOptimal()
+      sa.train()
+      val opt = sa.getOptimal()
       net.setWeights(opt.getData())
 
       // Yeah yeah yeah... 
@@ -84,9 +86,17 @@ object RandomizedOptimization {
         val pred = inst.getLabel().getData()
         val actual = net.getOutputValues()
         val err = pred.minus(actual).normSquared()
-        if (err > 0.5) 1 else 0
+        if (err >= 1) 1 else 0
       }).sum
-      println(f"Iteration $i%d: $err%d incorrect of $total%d")
+      val pct = 100.0 * err / total
+      if (pct < errBest) {
+        errBest = pct
+        println(f"Iteration $i%d: $pct%.2f%% ($err%d incorrect of $total%d)")
+      }
+    }
+
+    for (w <- net.getWeights()) {
+      println(w)
     }
 
     // Need to call 'train' on the OptimizationAlgorithm.  After each
