@@ -112,7 +112,6 @@ object RandomizedOptimization {
     next ()
   }
 
-
   def main(args: Array[String]) {
 
     // Faults data is tab-separated with 27 inputs, 7 outputs:
@@ -123,12 +122,24 @@ object RandomizedOptimization {
     })
     val faultRows = faults.size
     println(f"Read $faultRows%d rows.")
-    val training = optimizeNN(
-      faults, 0.8, List(27, 30, 7), x => new RandomizedHillClimbing(x))
-    for (((trainErr, testErr), idx) <- training.take(10).zipWithIndex) {
+
+    val echoErr = (tup: ((Double, Double), Int)) => {
+      val ((trainErr, testErr), idx) = tup
       val trainPct = trainErr * 100.0
       val testPct = testErr * 100.0
       println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
+    }
+
+    val algos = List(
+      ("RHC",  x => new RandomizedHillClimbing(x)),
+      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
+    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)]
+    for ((name, algo) <- algos) {
+      println(s"Faults, $name:")
+      // Potential problem here: Do we really want to randomize results each time?
+      val training = optimizeNN(faults, 0.75, List(27, 30, 7), algo)
+      training.take(10).zipWithIndex.foreach(echoErr)
     }
 
     // Temperature value is multiplied by cooling factor at each
@@ -150,12 +161,11 @@ object RandomizedOptimization {
     })
     val lettersRows = letters.size
     println(f"Read $lettersRows%d rows.")
-    val training2 = optimizeNN(
-      letters, 0.8, List(16, 16, 1), x => new SimulatedAnnealing(1e11, 0.95, (x)))
-    for (((trainErr, testErr), idx) <- training.take(10).zipWithIndex) {
-      val trainPct = trainErr * 100.0
-      val testPct = testErr * 100.0
-      println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
+    for ((name, algo) <- algos) {
+      println(s"Letters, $name:")
+      // Potential problem here: Do we really want to randomize results each time?
+      val training = optimizeNN(letters, 0.75, List(16, 16, 1), algo)
+      training.take(10).zipWithIndex.foreach(echoErr)
     }
   }
 
