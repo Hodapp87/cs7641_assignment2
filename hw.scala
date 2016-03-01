@@ -129,8 +129,8 @@ object RandomizedOptimization {
 
     val algos = List(
       ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
+      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
+      //("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val (faultTrain, faultTest) = splitTrainTest(0.75, faults)
@@ -144,9 +144,13 @@ object RandomizedOptimization {
     }
     for ((name, algo) <- algos) {
       println(s"Faults, $name:")
-      // Potential problem here: Do we really want to randomize results each time?
-      val nets = optimizeNN(faultTrain, List(27, 25, 7), algo)
-      nets.take(10).zipWithIndex.foreach(faultsErr)
+      for (runs <- 1 to 10) {
+        val nets = optimizeNN(faultTrain, List(27, 100, 7), algo)
+        val iters = 50
+        // Step 'iters' iterations in, and then test error:
+        faultsErr((nets(iters), iters))
+        //nets.take(5000).zipWithIndex.foreach(faultsErr)
+      }
     }
 
     // Temperature value is multiplied by cooling factor at each
@@ -193,7 +197,7 @@ object RandomizedOptimization {
       println(s"Letters, $name:")
       // Potential problem here: Do we really want to randomize results each time?
       val nets = optimizeNN(letterTrain, List(16, 8, 26), algo)
-      nets.take(10).zipWithIndex.foreach(lettersErr)
+      nets.take(1).zipWithIndex.foreach(lettersErr)
     }
   }
 
