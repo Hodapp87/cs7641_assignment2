@@ -56,7 +56,7 @@ object RandomizedOptimization {
   // Split the given data randomly into (training, testing) where
   // 'ratio' gives the amount to devote to each (e.g. ratio = 0.75 is
   // 75% for training, 25% for testing).
-  def splitTrainTest(ratio: Float, data: Iterable[Instance]) :
+  def splitTrainTest(ratio: Double, data: Iterable[Instance]) :
       (Iterable[Instance], Iterable[Instance]) =
   {
     // Randomize data:
@@ -81,6 +81,38 @@ object RandomizedOptimization {
     incorrect.toDouble / size
   }
 
+  // Given a dataset, training/test ratio, number of nodes at each
+  // layer of the neural network, and a function which produces an
+  // OptimizationAlgorithm, construct a neural network and train it
+  // one step at a time with the returned OptimizationAlgorithm.  This
+  // returns a Stream of (training error, testing error).
+  def optimizeNN(
+    set: Iterable[Instance], ratio: Double, nodes: Iterable[Int],
+    optFn: NeuralNetworkOptimizationProblem => OptimizationAlgorithm) :
+      Stream[(Double, Double)] =
+  {
+    // Separate data, build neural network & OptimizationAlgorithm:
+    val (train, test) = splitTrainTest(ratio, set)
+    val trainSet = new DataSet(train.toArray)
+    val testSet = new DataSet(test.toArray)
+    val (net, prob) = getNeuralNet(trainSet, nodes)
+    val opt = optFn(prob)
+
+    // At every step...
+    def next() : Stream[(Double, Double)] = {
+      // Train the network & use the updated weights:
+      opt.train()
+      net.setWeights(opt.getOptimal().getData())
+      // Get training & testing error:
+      val trainErr = neuralNetError(trainSet, net)
+      val testErr = neuralNetError(testSet, net);
+      // Put that at the head of the (lazy) list:
+      (trainErr, testErr) #:: next ()
+    }
+    next ()
+  }
+
+
   def main(args: Array[String]) {
 
     // Faults data is tab-separated with 27 inputs, 7 outputs:
@@ -89,64 +121,42 @@ object RandomizedOptimization {
       instance(row.slice(0, 27).map( x => x.toDouble ), // input
         row.slice(27, 34).map( x => x.toDouble )) // output
     })
-    val (faultTrain, faultTest) = splitTrainTest(0.8f, faults);
-    {
-      val faultRows = faults.size
-      println(f"Read $faultRows%d rows.")
-      val (trainSize, testSize) = (faultTrain.size, faultTest.size)
-      println(f"Split $trainSize%d for training, $testSize%d for testing.")
+    val faultRows = faults.size
+    println(f"Read $faultRows%d rows.")
+    val training = optimizeNN(
+      faults, 0.8, List(27, 30, 7), x => new RandomizedHillClimbing(x))
+    for (((trainErr, testErr), idx) <- training.take(10).zipWithIndex) {
+      val trainPct = trainErr * 100.0
+      val testPct = testErr * 100.0
+      println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
     }
-    val faultSetTrain = new DataSet(faultTrain.toArray)
-    val faultSetTest = new DataSet(faultTest.toArray)
-    // Problem(ish): I need 'prob' to train, and 'net' to test later on.
-    val (net, prob) = getNeuralNet(faultSetTrain, List(27, 30, 7))
-
-    //val rhc = new RandomizedHillClimbing(prob)
 
     // Temperature value is multiplied by cooling factor at each
     // iteration, that is, the temperature at iteration N is T*cool^N.
     // Thus, to get temperature Tf at iteration N starting from temp
     // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
-    val sa = new SimulatedAnnealing(1e11, 0.95, prob)
-    for (i <- 1 to 1000) {
-      // Iterate (mutating everything):
-      sa.train()
-      val opt = sa.getOptimal()
-      net.setWeights(opt.getData())
+    //val opt = new SimulatedAnnealing(1e11, 0.95, prob)
 
-      val trainErr = neuralNetError(faultSetTrain, net)
-      val testErr = neuralNetError(faultSetTest, net);
-
-      {
-        val trainPct = trainErr * 100.0
-        val testPct = testErr * 100.0
-        println(f"Iter $i%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
-      }
-    }
-
-    for (w <- net.getWeights()) {
-      println(w)
-    }
-
-    // Need to call 'train' on the OptimizationAlgorithm.  After each
-    // call, I need to set samples at the network's input, get the
-    // outputs, and check them for correctness.
-    // This repeats for whatever number of iterations is desired.
-
-    //val faultProblems = List(
-    //  new RandomizedHillClimbing(getNeuralNet(set, layers
-    //)
+    //for (w <- net.getWeights()) {
+      //println(w)
+    //}
 
     // Letter recognition is normal CSV; first field is output (it's a
     // character), 16 fields after are inputs:
     println(s"Reading $lettersFile:")
     val letters = CSVReader.open(lettersFile).all().map( row => {
       instance(row.slice(1, 16).map( x => x.toDouble ), // input
-        List(0.0)) // output
+        List(row(0)(0).toInt - 65)) // output (just a char)
     })
     val lettersRows = letters.size
     println(f"Read $lettersRows%d rows.")
-    val letterSet = new DataSet(letters.toArray)
+    val training2 = optimizeNN(
+      letters, 0.8, List(16, 16, 1), x => new SimulatedAnnealing(1e11, 0.95, (x)))
+    for (((trainErr, testErr), idx) <- training.take(10).zipWithIndex) {
+      val trainPct = trainErr * 100.0
+      val testPct = testErr * 100.0
+      println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
+    }
   }
 
 }
