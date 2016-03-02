@@ -89,6 +89,16 @@ object RandomizedOptimization {
     incorrect.toDouble / size
   }
 
+  def echoError(
+    id: String, bpn: BackPropagationNetwork, train: DataSet, test: DataSet) =
+  {
+    val trainErr = nnBinaryError(train, bpn)
+    val testErr = nnBinaryError(test, bpn)
+    val trainPct = trainErr * 100.0
+    val testPct = testErr * 100.0
+    println(f"$id: $trainPct%.2f%% train, $testPct%.2f%% test error")
+  }
+
   // Given a training dataset, number of nodes at each layer of the
   // neural network, and a function which produces an
   // OptimizationAlgorithm, construct a neural network and train it
@@ -134,21 +144,16 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val (faultTrain, faultTest) = splitTrainTest(0.75, faults)
-    val faultsErr = (v : (BackPropagationNetwork,Int)) => {
-      val (bpn, idx) = v
-      val trainErr = nnBinaryError(faultTrain, bpn)
-      val testErr = nnBinaryError(faultTest, bpn)
-      val trainPct = trainErr * 100.0
-      val testPct = testErr * 100.0
-      println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
-    }
     for ((name, algo) <- algos) {
-      println(s"Faults, $name:")
-      for (runs <- 1 to 10) {
+      for (run <- (1 to 10).par) {
+        println(s"Starting run $run of $name for steel faults...")
         val nets = optimizeNN(faultTrain, List(27, 100, 7), algo)
-        val iters = 50
-        // Step 'iters' iterations in, and then test error:
-        faultsErr((nets(iters), iters))
+        for (iters <- List(1, 2, 3)) {
+        //for (iters <- List(1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000)) {
+          // Step 'iters' iterations in, and then test error:
+          val id = f"Faults, iter $iters%d, run $run"
+          echoError(id, nets(iters), faultTrain, faultTest)
+        }
         //nets.take(5000).zipWithIndex.foreach(faultsErr)
       }
     }
@@ -179,25 +184,23 @@ object RandomizedOptimization {
 
     val algos2 = List(
       ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
+      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
+      //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val (letterTrain, letterTest) = splitTrainTest(0.75, letters)
-    val lettersErr = (v : (BackPropagationNetwork,Int)) => {
-      val (bpn, idx) = v
-      val trainErr = nnBinaryError(letterTrain, bpn)
-      val testErr = nnBinaryError(letterTest, bpn)
-      val trainPct = trainErr * 100.0
-      val testPct = testErr * 100.0
-      println(f"Iter $idx%d: $trainPct%.2f%% train, $testPct%.2f%% test error")
-    }
-    
     for ((name, algo) <- algos2) {
-      println(s"Letters, $name:")
-      // Potential problem here: Do we really want to randomize results each time?
-      val nets = optimizeNN(letterTrain, List(16, 8, 26), algo)
-      nets.take(1).zipWithIndex.foreach(lettersErr)
+      for (run <- (1 to 10).par) {
+        println(s"Starting run $run of $name for letters...")
+        val nets = optimizeNN(letterTrain, List(16, 120, 26), algo)
+        for (iters <- List(1, 2, 3)) {
+        //for (iters <- List(1000, 2000, 3000)) {
+          // Step 'iters' iterations in, and then test error:
+          val id = f"Letters, iter $iters%d, run $run"
+          echoError(id, nets(iters), letterTrain, letterTest)
+        }
+        //nets.take(5000).zipWithIndex.foreach(faultsErr)
+      }
     }
   }
 
