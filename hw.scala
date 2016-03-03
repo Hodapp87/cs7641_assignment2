@@ -18,6 +18,7 @@ import argonaut._, Argonaut._
 import dist.DiscreteDependencyTree
 import dist.DiscreteUniformDistribution
 import dist.Distribution
+import func.nn.activation._
 import func.nn.backprop._
 import opt._
 import opt.example._
@@ -29,9 +30,6 @@ import shared._
 import util.linalg.Vector
 
 object RandomizedOptimization {
-
-  val faultsFile = "Faults.NNA"
-  val lettersFile = "letter-recognition.data"
 
   // Override implicit object CSVReader.open uses & change delimiter:
   def tabReader(fname : String) : CSVReader = {
@@ -54,7 +52,7 @@ object RandomizedOptimization {
       (BackPropagationNetwork, NeuralNetworkOptimizationProblem) =
   {
     val factory = new BackPropagationNetworkFactory()
-    val net = factory.createClassificationNetwork(nodes.toArray)
+    val net = factory.createClassificationNetwork(nodes.toArray, new LogisticSigmoid())
     val sse = new SumOfSquaresError()
     val opt = new NeuralNetworkOptimizationProblem(set, net, sse)
     (net, opt)
@@ -94,16 +92,6 @@ object RandomizedOptimization {
     }).sum
     // Then, turn this to an average:
     incorrect.toDouble / size
-  }
-
-  def echoError(
-    id: String, bpn: BackPropagationNetwork, train: DataSet, test: DataSet) =
-  {
-    val trainErr = nnBinaryError(train, bpn)
-    val testErr = nnBinaryError(test, bpn)
-    val trainPct = trainErr * 100.0
-    val testPct = testErr * 100.0
-    println(f"$id: $trainPct%.2f%% train, $testPct%.2f%% test error")
   }
 
   // Given a training dataset, number of nodes at each layer of the
@@ -169,15 +157,47 @@ object RandomizedOptimization {
     f.write("]")
   }
 
+  // Normalize the given data to have mean of 0 and variance of 1.
+  def normalize(data: Iterable[Double]) : Iterable[Double] = {
+    val mean = data.sum / data.size
+    val meanZero = data.map( d => d - mean )
+    val variance = meanZero.map( d => d*d ).sum / data.size
+    meanZero.map( d => d / Math.sqrt(variance) )
+  }
+
   def main(args: Array[String]) {
+
+    val faultsFile = "Faults.NNA"
+    val lettersFile = "letter-recognition.data"
 
     // Faults data is tab-separated with 27 inputs, 7 outputs:
     println(s"Reading $faultsFile:")
-    val faults = tabReader(faultsFile).all().map( row => {
-      instance(row.slice(0, 27).map( x => x.toDouble ), // input
+    val faultsRaw = tabReader(faultsFile).all().map( row => {
+      (row.slice(0, 27).map( x => x.toDouble ), // input
         row.slice(27, 34).map( x => x.toDouble )) // output
     })
+    // 'faultsRaw' contains a list of tuples, one tuple per *row* of
+    // data.  Each tuple contains (input, output).
+    // 
+    // 'faultsTransIn' separates this out into a list of lists and then
+    // transposes it - so each outer list contains one entire
+    // *dimension* of input:
+    val faultsTransIn = faultsRaw.map(t => t._1).transpose
+    // Each dimension then is normalized, and then we transpose back,
+    // so 'faultsInNormed' then contains a list of lists, each outer
+    // list containing one *row* of input:
+    val faultsInNormed = faultsTransIn.map(normalize).transpose
+    // We don't need to transform the output at all (it's already 0/1
+    // classifications), so simply extract it from the tuple and then
+    // this is the same format as 'faultsInNormed':
+    val faultsOut = faultsRaw.map { t => t._2 }
+    // Finally, turn these into a form ABAGAIL will take:
+    val faults = faultsInNormed.zip(faultsOut).map {
+      case (in, out) =>
+        instance(in, out)
+    }
     val faultRows = faults.size
+    // TODO: Factor the above code into a function if possible.
     println(f"Read $faultRows%d rows.")
 
     // Temperature value is multiplied by cooling factor at each
@@ -191,14 +211,17 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
-    val writer = new PrintWriter(new File("faults-nn.json"))
+    val writer = new PrintWriter(new File("faults-nn-normed.json"))
     // This is a hack because I can't hand Argonaut the full-size
     // array, and even though I'm generating it as a lazy list, I
     // don't know how if Argonaut will generate incrementally.
     val (faultTrain, faultTest) = splitTrainTest(split, faults)
+    val faultTrainSize = faultTrain.size
+    val faultTestSize = faultTest.size
+    println(s"Training: $faultTrainSize, testing: $faultTestSize")
     val results = algos.par.flatMap { case (name,algo) =>
-      (1 to 10).par.flatMap { run =>
-        List(10, 20, 30, 40).par.flatMap { hiddenNodes =>
+      (1 to 2).par.flatMap { run =>
+        List(10).par.flatMap { hiddenNodes =>
           println(s"Starting $name, run $run")
           val nets = optimizeNN(faultTrain, List(27, hiddenNodes, 7), algo)
           nets.zipWithIndex.take(50).flatMap { case (bpn,iter) =>
@@ -219,6 +242,8 @@ object RandomizedOptimization {
     //for (w <- net.getWeights()) {
     //  println(w)
     //}
+
+    // TODO: Normalize letter data too!
 
     // Letter recognition is normal CSV; first field is output (it's a
     // character), 16 fields after are inputs:
