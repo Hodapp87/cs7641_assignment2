@@ -1,13 +1,20 @@
 // Chris Hodapp (chodapp3@gatech.edu)
 // Georgia Institute of Technology
 // CS7641, Machine Learning, Spring 2016
-// Assignment 2, Randomized Optimization (2016-02-22)
+// Assignment 2, Randomized Optimization (2016-03-13)
 
 // Before I forget:
 // sbt -Dsbt.log.noformat=true run
 
-import com.github.tototoshi.csv._
+// Java dependencies:
+import java.io._
 
+// CSV & JSON dependencies:
+import com.github.tototoshi.csv._
+// TODO: Look at https://nrinaudo.github.io/kantan.csv/
+import argonaut._, Argonaut._
+
+// ABAGAIL dependencies:
 import dist.DiscreteDependencyTree
 import dist.DiscreteUniformDistribution
 import dist.Distribution
@@ -144,19 +151,32 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val (faultTrain, faultTest) = splitTrainTest(0.75, faults)
-    for ((name, algo) <- algos) {
-      for (run <- (1 to 10).par) {
-        println(s"Starting run $run of $name for steel faults...")
-        val nets = optimizeNN(faultTrain, List(27, 100, 7), algo)
-        for (iters <- List(1, 2, 3)) {
-        //for (iters <- List(1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000)) {
-          // Step 'iters' iterations in, and then test error:
-          val id = f"Faults, iter $iters%d, run $run"
-          echoError(id, nets(iters), faultTrain, faultTest)
+    val results = algos.flatMap { case (name,algo) =>
+      (1 to 10).par.flatMap { run =>
+        println(s"Starting $name, run $run")
+        val nets = optimizeNN(faultTrain, List(27, 14, 7), algo)
+        nets.zipWithIndex.take(500).flatMap { case (bpn,iter) =>
+          val trainErr = nnBinaryError(faultTrain, bpn)
+          val testErr = nnBinaryError(faultTest, bpn)
+          val tup = (name, run, iter, trainErr, testErr)
+          if (iter % 100 == 0)
+            println(tup)
+          List(tup)
         }
-        //nets.take(5000).zipWithIndex.foreach(faultsErr)
       }
     }
+    val writer = new PrintWriter(new File("chodapp3-assignment2-faults.json"))
+    val resultsDict = results.map {
+      case (name, run, iter, trainErr, testErr) =>
+        ("name"     := jString(name))     ->:
+        ("run"      := jNumber(run))      ->:
+        ("iter"     := jNumber(iter))     ->:
+        ("trainErr" := jNumber(trainErr)) ->:
+        ("testErr"  := jNumber(testErr))  ->:
+        jEmptyObject
+    }
+    writer.write(jArray(resultsDict).toString)
+    writer.close()
 
     // Temperature value is multiplied by cooling factor at each
     // iteration, that is, the temperature at iteration N is T*cool^N.
@@ -193,10 +213,10 @@ object RandomizedOptimization {
       for (run <- (1 to 10).par) {
         println(s"Starting run $run of $name for letters...")
         val nets = optimizeNN(letterTrain, List(16, 120, 26), algo)
-        for (iters <- List(1, 2, 3)) {
-        //for (iters <- List(1000, 2000, 3000)) {
+        for (iters <- List()) {
+        //for (iters <- List(1000, 2000, 4000, 8000, 16000, 32000)) {
           // Step 'iters' iterations in, and then test error:
-          val id = f"Letters, iter $iters%d, run $run"
+          val id = f"Letters, $name iter $iters%d, run $run"
           echoError(id, nets(iters), letterTrain, letterTest)
         }
         //nets.take(5000).zipWithIndex.foreach(faultsErr)
