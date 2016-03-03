@@ -4,7 +4,7 @@
 // Assignment 2, Randomized Optimization (2016-03-13)
 
 // Before I forget:
-// sbt -Dsbt.log.noformat=true run
+// sbt -Dsbt.log.noformat=true compile
 
 // Java dependencies:
 import java.io._
@@ -30,6 +30,135 @@ import shared._
 import util.linalg.Vector
 
 object RandomizedOptimization {
+
+  def main(args: Array[String]) {
+    // If 'true', then use the full datasets; if false, then greatly
+    // reduce them so that we don't blow up Travis when committing,
+    // but still test the same basic code paths.
+    val full = false;
+    steelFaults(full)
+    letterRecognition(full)
+  }
+
+    // Run everything for the steel faults classification problem.
+  def steelFaults(full : Boolean) {
+    val faultsFile = "Faults.NNA"
+    val faultsOutput = "faults-nn-multiple.json"
+    
+    // Faults data is tab-separated with 27 inputs, 7 outputs:
+    println(s"Reading $faultsFile:")
+    val faultsRaw = tabReader(faultsFile).all().map( row => {
+      (row.slice(0, 27).map( x => x.toDouble ), // input
+        row.slice(27, 34).map( x => x.toDouble )) // output
+    })
+    val faultsCond = conditionAttribs(faultsRaw)
+    val faults = if (full) faultsCond else
+      faultsCond.take((0.05 * faultsCond.size).toInt)
+    val faultRows = faults.size
+    // TODO: Factor the above code into a function if possible.
+    println(f"Read $faultRows%d rows.")
+
+    // Temperature value is multiplied by cooling factor at each
+    // iteration, that is, the temperature at iteration N is T*cool^N.
+    // Thus, to get temperature Tf at iteration N starting from temp
+    // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
+    val algos = List(
+      ("RHC",  x => new RandomizedHillClimbing(x)),
+      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
+    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+    val split = 0.75
+    val (train, test) = splitTrainTest(split, faults)
+    val trainSize = train.size
+    val testSize = test.size
+    val iters = if (full) 20000 else 500
+    println(s"Training: $trainSize, testing: $testSize")
+    val results = algos.par.flatMap { case (name,algo) =>
+      (1 to 1).par.flatMap { run =>
+        List(20).par.flatMap { hiddenNodes =>
+          println(s"Starting $name, run $run, $hiddenNodes nodes")
+          val nets = optimizeNN(train, List(27, hiddenNodes, 7), algo)
+          nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
+            val trainErr = nnBinaryError(train, bpn)
+            val testErr = nnBinaryError(test, bpn)
+            val testRec = TestRecord(
+              "faults", name, split, hiddenNodes, run, iter, trainErr, testErr)
+            if (iter % 100 == 0)
+              println(testRec)
+            List(testRec)
+          }
+        }
+      }
+    }
+
+    {
+      val writer = new PrintWriter(new File(faultsOutput))
+      writeJson(writer, results)
+      writer.close()
+    }
+
+    //for (w <- net.getWeights()) {
+    //  println(w)
+    //}
+  }
+
+  // Run everything for the steel letter recognition problem.
+  def letterRecognition(full : Boolean) {
+    val lettersFile = "letter-recognition.data"
+    val lettersOutput = "letters-nn-normed.json"
+
+    // Letter recognition is normal CSV; first field is output (it's a
+    // character), 16 fields after are inputs:
+    println(s"Reading $lettersFile:")
+    val lettersRaw = CSVReader.open(lettersFile).all().map( row => {
+      // Output is a character from A-Z, so we turn it to 26 outputs:
+      val letterClass = { (idx : Int) =>
+        if ((row(0)(0).toInt - 65) == idx) 1.0 else 0.0
+      }
+      (row.slice(1, 17).map( x => x.toDouble ), // input
+        (0 to 26).map(letterClass)) // output
+    })
+    val lettersCond = conditionAttribs(lettersRaw)
+    val letters = if (full) lettersCond else
+      lettersCond.take((0.05 * lettersCond.size).toInt)
+
+    val lettersRows = letters.size
+    println(f"Read $lettersRows%d rows.")
+
+    val algos = List(
+      ("RHC",  x => new RandomizedHillClimbing(x)),
+      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
+      //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
+    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+    val split = 0.75
+    val (train, test) = splitTrainTest(split, letters)
+    val iters = if (full) 5000 else 200
+    val results = algos.par.flatMap { case (name,algo) =>
+      (1 to 1).par.flatMap { run =>
+        List(10, 20, 40, 60).par.flatMap { hiddenNodes =>
+          println(s"Starting $name, run $run, $hiddenNodes nodes")
+          val nets = optimizeNN(train, List(16, hiddenNodes, 7), algo)
+          nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
+            val trainErr = nnBinaryError(train, bpn)
+            val testErr = nnBinaryError(test, bpn)
+            val testRec = TestRecord(
+              "letters", name, split, hiddenNodes, run, iter, trainErr, testErr)
+            if (iter % 100 == 0)
+              println(testRec)
+            List(testRec)
+          }
+        }
+      }
+    }
+
+    {
+      val writer = new PrintWriter(new File(lettersOutput))
+      writeJson(writer, results)
+      writer.close()
+    }
+  }
 
   // Override implicit object CSVReader.open uses & change delimiter:
   def tabReader(fname : String) : CSVReader = {
@@ -165,126 +294,35 @@ object RandomizedOptimization {
     meanZero.map( d => d / Math.sqrt(variance) )
   }
 
-  def main(args: Array[String]) {
-
-    val faultsFile = "Faults.NNA"
-    val lettersFile = "letter-recognition.data"
-
-    // Faults data is tab-separated with 27 inputs, 7 outputs:
-    println(s"Reading $faultsFile:")
-    val faultsRaw = tabReader(faultsFile).all().map( row => {
-      (row.slice(0, 27).map( x => x.toDouble ), // input
-        row.slice(27, 34).map( x => x.toDouble )) // output
-    })
-    // 'faultsRaw' contains a list of tuples, one tuple per *row* of
-    // data.  Each tuple contains (input, output).
-    // 
-    // 'faultsTransIn' separates this out into a list of lists and then
+  // Turn an Iterable of (input, output) instances into an iterable of
+  // ABAGAIL Instance objects, containing each input, normalized and
+  // labeled with corresponding output.
+  // 
+  // More specifically: Given an Iterable of (input, output) where
+  // each element corresponds to a single row (or instance) of data,
+  // each one consisting of an Iterable of inputs and an Iterable of
+  // outputs (that is, a value in every attribute of input and
+  // output), return an Iterable of Instances which contain the input
+  // values, normalized on each attribute, and labeled with the
+  // outputs.  Outputs are assumed to require no normalization.
+  def conditionAttribs(in: Iterable[(Iterable[Double], Iterable[Double])]) :
+      Iterable[Instance] =
+  {
+    // 'in' contains a list of tuples, one tuple per *row* of data.
+    // 'inTrans' separates this out into a list of lists and then
     // transposes it - so each outer list contains one entire
-    // *dimension* of input:
-    val faultsTransIn = faultsRaw.map(t => t._1).transpose
-    // Each dimension then is normalized, and then we transpose back,
-    // so 'faultsInNormed' then contains a list of lists, each outer
-    // list containing one *row* of input:
-    val faultsInNormed = faultsTransIn.map(normalize).transpose
-    // We don't need to transform the output at all (it's already 0/1
-    // classifications), so simply extract it from the tuple and then
-    // this is the same format as 'faultsInNormed':
-    val faultsOut = faultsRaw.map { t => t._2 }
+    // *attribute* of the input:
+    val inTrans = in.map(t => t._1).transpose
+    // We then normalize each attribute and transpose back, so
+    // 'inNormed' then contains a list of lists, each outer list
+    // containing one *row* of input:
+    val inNormed = inTrans.map(normalize).transpose
+    // We don't need to transform the output at all, so simply extract
+    // it from the tuple and then this is the same format as
+    // 'inNormed':
+    val out = in.map { t => t._2 }
     // Finally, turn these into a form ABAGAIL will take:
-    val faults = faultsInNormed.zip(faultsOut).map {
-      case (in, out) =>
-        instance(in, out)
-    }
-    val faultRows = faults.size
-    // TODO: Factor the above code into a function if possible.
-    println(f"Read $faultRows%d rows.")
-
-    // Temperature value is multiplied by cooling factor at each
-    // iteration, that is, the temperature at iteration N is T*cool^N.
-    // Thus, to get temperature Tf at iteration N starting from temp
-    // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
-    val algos = List(
-      ("RHC",  x => new RandomizedHillClimbing(x))
-      //("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
-      //("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
-    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
-
-    val split = 0.75
-    val writer = new PrintWriter(new File("faults-nn-normed.json"))
-    // This is a hack because I can't hand Argonaut the full-size
-    // array, and even though I'm generating it as a lazy list, I
-    // don't know how if Argonaut will generate incrementally.
-    val (faultTrain, faultTest) = splitTrainTest(split, faults)
-    val faultTrainSize = faultTrain.size
-    val faultTestSize = faultTest.size
-    println(s"Training: $faultTrainSize, testing: $faultTestSize")
-    val results = algos.par.flatMap { case (name,algo) =>
-      (1 to 2).par.flatMap { run =>
-        List(10).par.flatMap { hiddenNodes =>
-          println(s"Starting $name, run $run")
-          val nets = optimizeNN(faultTrain, List(27, hiddenNodes, 7), algo)
-          nets.zipWithIndex.take(50).flatMap { case (bpn,iter) =>
-            val trainErr = nnBinaryError(faultTrain, bpn)
-            val testErr = nnBinaryError(faultTest, bpn)
-            val testRec = TestRecord(
-              "faults", name, split, hiddenNodes, run, iter, trainErr, testErr)
-            if (iter % 100 == 0)
-              println(testRec)
-            List(testRec)
-          }
-        }
-      }
-    }
-    writeJson(writer, results)
-    writer.close()
-
-    //for (w <- net.getWeights()) {
-    //  println(w)
-    //}
-
-    // TODO: Normalize letter data too!
-
-    // Letter recognition is normal CSV; first field is output (it's a
-    // character), 16 fields after are inputs:
-    println(s"Reading $lettersFile:")
-    val letters = CSVReader.open(lettersFile).all().map( row => {
-      // Output is a character from A-Z, so we turn it to 26 outputs:
-      val out = (0 to 26).map( idx => {
-        if ((row(0)(0).toInt - 65) == idx) 1.0 else 0.0
-      })
-      //println(out)
-      instance(row.slice(1, 17).map( x => x.toDouble ), out)
-    })
-    val lettersRows = letters.size
-    println(f"Read $lettersRows%d rows.")
-
-    val algos2 = List(
-      ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
-      //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
-    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
-
-    val writer2 = new PrintWriter(new File("letters-nn.json"))
-    val hiddenNodes = 10
-    val (letterTrain, letterTest) = splitTrainTest(0.75, letters)
-    val results2 = algos.par.flatMap { case (name,algo) =>
-      (1 to 10).par.flatMap { run =>
-        println(s"Starting $name, run $run")
-        val nets = optimizeNN(letterTrain, List(16, hiddenNodes, 7), algo)
-        nets.zipWithIndex.take(10).flatMap { case (bpn,iter) =>
-          val trainErr = nnBinaryError(letterTrain, bpn)
-          val testErr = nnBinaryError(letterTest, bpn)
-          val testRec = TestRecord(
-            "letters", name, split, hiddenNodes, run, iter, trainErr, testErr)
-          if (iter % 100 == 0)
-            println(testRec)
-          List(testRec)
-        }
-      }
-    }
-    writeJson(writer2, results)
-    writer.close()
+    inNormed.zip(out).map { case (in, out) => instance(in, out) }
   }
 
 }
