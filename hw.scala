@@ -133,6 +133,42 @@ object RandomizedOptimization {
     next ()
   }
 
+  case class TestRecord(test: String, name: String, split: Double,
+    hiddenNodes: Int, run: Int, iter: Int, trainErr: Double, testErr: Double)
+
+  implicit def TestRecordJson: EncodeJson[TestRecord] =
+    EncodeJson((p: TestRecord) => {
+      ("test"        := jString("faults"))      ->:
+      ("name"        := jString(p.name))        ->:
+      ("run"         := jNumber(p.run))         ->:
+      ("split"       := jNumber(p.split))       ->:
+      ("hiddenNodes" := jNumber(p.hiddenNodes)) ->:
+      ("iter"        := jNumber(p.iter))        ->:
+      ("trainErr"    := jNumber(p.trainErr))    ->:
+      ("testErr"     := jNumber(p.testErr))     ->:
+      jEmptyObject
+    })
+
+  // Write the given records to the Writer (which will not be closed).
+  // TODO: Make all of this more general.  I'm using 'for' (via
+  // 'flatMap', I think), 'take', and 'drop' on the ParSeq, and there
+  // is a more general trait I can use, but I don't know how.
+  def writeJson(f: Writer,
+    records: scala.collection.parallel.immutable.ParSeq[TestRecord])
+  {
+    // This is sort of manually writing the array because of
+    // https://github.com/argonaut-io/argonaut/issues/52
+    f.write("[")
+    // The first record must be written with no leading commo:
+    f.write(records.apply(0).asJson.toString)
+    // ...so that the rest can all be written with a leading comma,
+    // and then regardless of the order, come out fine:
+    for (r <- records.drop(1)) {
+      f.write("," + r.asJson.toString)
+    }
+    f.write("]")
+  }
+
   def main(args: Array[String]) {
 
     // Faults data is tab-separated with 27 inputs, 7 outputs:
@@ -144,45 +180,41 @@ object RandomizedOptimization {
     val faultRows = faults.size
     println(f"Read $faultRows%d rows.")
 
-    val algos = List(
-      ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
-      //("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
-    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
-
-    val (faultTrain, faultTest) = splitTrainTest(0.75, faults)
-    val results = algos.flatMap { case (name,algo) =>
-      (1 to 10).par.flatMap { run =>
-        println(s"Starting $name, run $run")
-        val nets = optimizeNN(faultTrain, List(27, 14, 7), algo)
-        nets.zipWithIndex.take(500).flatMap { case (bpn,iter) =>
-          val trainErr = nnBinaryError(faultTrain, bpn)
-          val testErr = nnBinaryError(faultTest, bpn)
-          val tup = (name, run, iter, trainErr, testErr)
-          if (iter % 100 == 0)
-            println(tup)
-          List(tup)
-        }
-      }
-    }
-    val writer = new PrintWriter(new File("chodapp3-assignment2-faults.json"))
-    val resultsDict = results.map {
-      case (name, run, iter, trainErr, testErr) =>
-        ("name"     := jString(name))     ->:
-        ("run"      := jNumber(run))      ->:
-        ("iter"     := jNumber(iter))     ->:
-        ("trainErr" := jNumber(trainErr)) ->:
-        ("testErr"  := jNumber(testErr))  ->:
-        jEmptyObject
-    }
-    writer.write(jArray(resultsDict).toString)
-    writer.close()
-
     // Temperature value is multiplied by cooling factor at each
     // iteration, that is, the temperature at iteration N is T*cool^N.
     // Thus, to get temperature Tf at iteration N starting from temp
     // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
-    //val opt = new SimulatedAnnealing(1e11, 0.95, prob)
+    val algos = List(
+      ("RHC",  x => new RandomizedHillClimbing(x))
+      //("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
+      //("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
+    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+    val split = 0.75
+    val writer = new PrintWriter(new File("faults-nn.json"))
+    // This is a hack because I can't hand Argonaut the full-size
+    // array, and even though I'm generating it as a lazy list, I
+    // don't know how if Argonaut will generate incrementally.
+    val (faultTrain, faultTest) = splitTrainTest(split, faults)
+    val results = algos.par.flatMap { case (name,algo) =>
+      (1 to 10).par.flatMap { run =>
+        List(10, 20, 30, 40).par.flatMap { hiddenNodes =>
+          println(s"Starting $name, run $run")
+          val nets = optimizeNN(faultTrain, List(27, hiddenNodes, 7), algo)
+          nets.zipWithIndex.take(50).flatMap { case (bpn,iter) =>
+            val trainErr = nnBinaryError(faultTrain, bpn)
+            val testErr = nnBinaryError(faultTest, bpn)
+            val testRec = TestRecord(
+              "faults", name, split, hiddenNodes, run, iter, trainErr, testErr)
+            if (iter % 100 == 0)
+              println(testRec)
+            List(testRec)
+          }
+        }
+      }
+    }
+    writeJson(writer, results)
+    writer.close()
 
     //for (w <- net.getWeights()) {
     //  println(w)
@@ -208,20 +240,26 @@ object RandomizedOptimization {
       //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
+    val writer2 = new PrintWriter(new File("letters-nn.json"))
+    val hiddenNodes = 10
     val (letterTrain, letterTest) = splitTrainTest(0.75, letters)
-    for ((name, algo) <- algos2) {
-      for (run <- (1 to 10).par) {
-        println(s"Starting run $run of $name for letters...")
-        val nets = optimizeNN(letterTrain, List(16, 120, 26), algo)
-        for (iters <- List()) {
-        //for (iters <- List(1000, 2000, 4000, 8000, 16000, 32000)) {
-          // Step 'iters' iterations in, and then test error:
-          val id = f"Letters, $name iter $iters%d, run $run"
-          echoError(id, nets(iters), letterTrain, letterTest)
+    val results2 = algos.par.flatMap { case (name,algo) =>
+      (1 to 10).par.flatMap { run =>
+        println(s"Starting $name, run $run")
+        val nets = optimizeNN(letterTrain, List(16, hiddenNodes, 7), algo)
+        nets.zipWithIndex.take(10).flatMap { case (bpn,iter) =>
+          val trainErr = nnBinaryError(letterTrain, bpn)
+          val testErr = nnBinaryError(letterTest, bpn)
+          val testRec = TestRecord(
+            "letters", name, split, hiddenNodes, run, iter, trainErr, testErr)
+          if (iter % 100 == 0)
+            println(testRec)
+          List(testRec)
         }
-        //nets.take(5000).zipWithIndex.foreach(faultsErr)
       }
     }
+    writeJson(writer2, results)
+    writer.close()
   }
 
 }
