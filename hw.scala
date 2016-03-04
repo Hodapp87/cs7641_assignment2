@@ -36,14 +36,14 @@ object RandomizedOptimization {
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
     val full = false;
-    steelFaults(full)
     letterRecognition(full)
+    steelFaults(full)
   }
 
     // Run everything for the steel faults classification problem.
   def steelFaults(full : Boolean) {
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn-multiple.json"
+    val faultsOutput = "faults-nn-multiple-sa.json"
     
     // Faults data is tab-separated with 27 inputs, 7 outputs:
     println(s"Reading $faultsFile:")
@@ -63,16 +63,18 @@ object RandomizedOptimization {
     // Thus, to get temperature Tf at iteration N starting from temp
     // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
     val algos = List(
-      ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("GA",   x => new StandardGeneticAlgorithm(200, 100, 10, x))
+      ("RHC",     x => new RandomizedHillClimbing(x)),
+      ("SA-93",   x => new SimulatedAnnealing(1e11, 0.93, x)),
+      ("SA-95",   x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("SA-97",   x => new SimulatedAnnealing(1e11, 0.97, x)),
+      ("GA",      x => new StandardGeneticAlgorithm(200, 100, 10, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
     val (train, test) = splitTrainTest(split, faults)
     val trainSize = train.size
     val testSize = test.size
-    val iters = if (full) 20000 else 500
+    val iters = if (full) 10000 else 500
     println(s"Training: $trainSize, testing: $testSize")
     val results = algos.par.flatMap { case (name,algo) =>
       (1 to 1).par.flatMap { run =>
@@ -127,8 +129,10 @@ object RandomizedOptimization {
     println(f"Read $lettersRows%d rows.")
 
     val algos = List(
-      ("RHC",  x => new RandomizedHillClimbing(x)),
-      ("SA",   x => new SimulatedAnnealing(1e11, 0.95, x))
+      ("RHC",     x => new RandomizedHillClimbing(x)),
+      ("SA-93",   x => new SimulatedAnnealing(1e11, 0.93, x)),
+      ("SA-95",   x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("SA-97",   x => new SimulatedAnnealing(1e11, 0.97, x))
       //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
@@ -137,9 +141,9 @@ object RandomizedOptimization {
     val iters = if (full) 5000 else 200
     val results = algos.par.flatMap { case (name,algo) =>
       (1 to 1).par.flatMap { run =>
-        List(10, 20, 40, 60).par.flatMap { hiddenNodes =>
+        List(16, 32).par.flatMap { hiddenNodes =>
           println(s"Starting $name, run $run, $hiddenNodes nodes")
-          val nets = optimizeNN(train, List(16, hiddenNodes, 7), algo)
+          val nets = optimizeNN(train, List(16, hiddenNodes, 26), algo)
           nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
             val trainErr = nnBinaryError(train, bpn)
             val testErr = nnBinaryError(test, bpn)
