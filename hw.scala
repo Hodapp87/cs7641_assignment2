@@ -8,6 +8,7 @@
 
 // Java dependencies:
 import java.io._
+import java.util.Calendar
 
 // CSV & JSON dependencies:
 import com.github.tototoshi.csv._
@@ -42,9 +43,15 @@ object RandomizedOptimization {
 
     // Run everything for the steel faults classification problem.
   def steelFaults(full : Boolean) {
+    // --------------------------------------------------------------------
+    // Input & output filenames
+    // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn-multiple-sa.json"
+    val faultsOutput = "faults-nn2.json"
     
+    // --------------------------------------------------------------------
+    // Data loading and conditioning
+    // --------------------------------------------------------------------
     // Faults data is tab-separated with 27 inputs, 7 outputs:
     println(s"Reading $faultsFile:")
     val faultsRaw = tabReader(faultsFile).all().map( row => {
@@ -58,16 +65,20 @@ object RandomizedOptimization {
     // TODO: Factor the above code into a function if possible.
     println(f"Read $faultRows%d rows.")
 
+    // --------------------------------------------------------------------
+    // A note on simulated annealing:
     // Temperature value is multiplied by cooling factor at each
     // iteration, that is, the temperature at iteration N is T*cool^N.
     // Thus, to get temperature Tf at iteration N starting from temp
     // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
+    // --------------------------------------------------------------------
+
     val algos = List(
-      ("RHC",     x => new RandomizedHillClimbing(x)),
-      ("SA-93",   x => new SimulatedAnnealing(1e11, 0.93, x)),
-      ("SA-95",   x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("SA-97",   x => new SimulatedAnnealing(1e11, 0.97, x)),
-      ("GA",      x => new StandardGeneticAlgorithm(200, 100, 10, x))
+      ("RHC", x => new RandomizedHillClimbing(x)),
+      ("SA, 1e11 & 0.93", x => new SimulatedAnnealing(1e11, 0.93, x)),
+      ("SA, 1e11 & 0.95", x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("SA, 1e11 & 0.97", x => new SimulatedAnnealing(1e11, 0.97, x)),
+      ("GA, 200, 100, 10", x => new StandardGeneticAlgorithm(200, 100, 10, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
@@ -75,10 +86,12 @@ object RandomizedOptimization {
     val trainSize = train.size
     val testSize = test.size
     val iters = if (full) 10000 else 500
+    val runs = (1 to 1)
+    val nodeList = List(20)
     println(s"Training: $trainSize, testing: $testSize")
     val results = algos.par.flatMap { case (name,algo) =>
-      (1 to 1).par.flatMap { run =>
-        List(20).par.flatMap { hiddenNodes =>
+      runs.par.flatMap { run =>
+        nodeList.par.flatMap { hiddenNodes =>
           println(s"Starting $name, run $run, $hiddenNodes nodes")
           val nets = optimizeNN(train, List(27, hiddenNodes, 7), algo)
           nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
@@ -95,8 +108,11 @@ object RandomizedOptimization {
     }
 
     {
+      val algoList = algos.map(_._1)
+      val date = Calendar.getInstance().getTime()
+      val testId = f"Steel faults classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
       val writer = new PrintWriter(new File(faultsOutput))
-      writeJson(writer, results)
+      writeJson(writer, testId, results)
       writer.close()
     }
 
@@ -108,7 +124,7 @@ object RandomizedOptimization {
   // Run everything for the steel letter recognition problem.
   def letterRecognition(full : Boolean) {
     val lettersFile = "letter-recognition.data"
-    val lettersOutput = "letters-nn-normed.json"
+    val lettersOutput = "letters-nn3.json"
 
     // Letter recognition is normal CSV; first field is output (it's a
     // character), 16 fields after are inputs:
@@ -129,19 +145,21 @@ object RandomizedOptimization {
     println(f"Read $lettersRows%d rows.")
 
     val algos = List(
-      ("RHC",     x => new RandomizedHillClimbing(x)),
-      ("SA-93",   x => new SimulatedAnnealing(1e11, 0.93, x)),
-      ("SA-95",   x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("SA-97",   x => new SimulatedAnnealing(1e11, 0.97, x))
-      //("GA",   x => new StandardGeneticAlgorithm(500, 250, 40, x))
+      ("RHC", x => new RandomizedHillClimbing(x)),
+      ("SA, 1e11 & 0.95", x => new SimulatedAnnealing(1e11, 0.95, x)),
+      ("SA, 1e11 & 0.90", x => new SimulatedAnnealing(1e11, 0.90, x)),
+      ("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x)),
+      ("SA, 1e10 & 0.90", x => new SimulatedAnnealing(1e10, 0.90, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
     val (train, test) = splitTrainTest(split, letters)
-    val iters = if (full) 5000 else 200
+    val iters = if (full) 50000 else 200
+    val runs = (1 to 1)
+    val nodeList = List(30)
     val results = algos.par.flatMap { case (name,algo) =>
-      (1 to 1).par.flatMap { run =>
-        List(16, 32).par.flatMap { hiddenNodes =>
+      runs.par.flatMap { run =>
+        nodeList.par.flatMap { hiddenNodes =>
           println(s"Starting $name, run $run, $hiddenNodes nodes")
           val nets = optimizeNN(train, List(16, hiddenNodes, 26), algo)
           nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
@@ -158,8 +176,11 @@ object RandomizedOptimization {
     }
 
     {
+      val algoList = algos.map(_._1)
+      val date = Calendar.getInstance().getTime()
+      val testId = f"Letters classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
       val writer = new PrintWriter(new File(lettersOutput))
-      writeJson(writer, results)
+      writeJson(writer, testId, results)
       writer.close()
     }
   }
@@ -274,12 +295,17 @@ object RandomizedOptimization {
   // TODO: Make all of this more general.  I'm using 'for' (via
   // 'flatMap', I think), 'take', and 'drop' on the ParSeq, and there
   // is a more general trait I can use, but I don't know how.
-  def writeJson(f: Writer,
+  def writeJson(f: Writer, testId: String,
     records: scala.collection.parallel.immutable.ParSeq[TestRecord])
   {
+    // First, write out the test ID:
+    f.write("{")
+    f.write((("testId" := jString(testId)) ->: jEmptyObject).toString)
+    // Flush now, so a record at least hits disk of what we started:
+    f.flush()
     // This is sort of manually writing the array because of
     // https://github.com/argonaut-io/argonaut/issues/52
-    f.write("[")
+    f.write(",\"data\": [")
     // The first record must be written with no leading commo:
     f.write(records.apply(0).asJson.toString)
     // ...so that the rest can all be written with a leading comma,
@@ -287,7 +313,7 @@ object RandomizedOptimization {
     for (r <- records.drop(1)) {
       f.write("," + r.asJson.toString)
     }
-    f.write("]")
+    f.write("]}")
   }
 
   // Normalize the given data to have mean of 0 and variance of 1.
