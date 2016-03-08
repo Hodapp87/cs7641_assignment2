@@ -15,7 +15,7 @@ data <- jsonDump$data
 ## data <- fromJSON("letters-nn-normed2.json");
 ## This decimates the plot, but I'm not sure if it does it well (it
 ## won't do it per-test):
-skip <- 0
+skip <- 1
 data10 <- data[seq(1,nrow(data),by=skip),]
 
 dataAgg <- aggregate(

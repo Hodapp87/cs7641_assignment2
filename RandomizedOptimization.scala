@@ -54,7 +54,7 @@ object RandomizedOptimization {
     // Input & output filenames
     // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn-dummy.json"
+    val faultsOutput = "faults-nn17.json"
     
     // --------------------------------------------------------------------
     // Data loading and conditioning
@@ -98,9 +98,9 @@ object RandomizedOptimization {
     val (train, test) = splitTrainTest(split, faults)
     val trainSize = train.size
     val testSize = test.size
-    val iters = if (full) 10000 else 500
-    val runs = (1 to 2)
-    val nodeList = List(10)
+    val iters = if (full) 50000 else 500
+    val runs = (1 to 10)
+    val nodeList = List(10, 20)
     println(s"Training: $trainSize, testing: $testSize")
     val results = algos.flatMap { case (name,algo) =>
       runs.flatMap { run =>
@@ -389,7 +389,7 @@ object RandomizedOptimization {
   // will call 'writeJsonEnd' after all records are written.
   def writeJsonRecords(f: Writer, errors: Iterable[ErrorResult])
   {
-    for (r <- errors.zipWithIndex) {
+    for (r <- errors) {
       f.write("," + r.asJson.spaces2)
       f.flush()
     }
