@@ -44,7 +44,7 @@ object RandomizedOptimization {
     // but still test the same basic code paths.
     val full = false;
     steelFaults(full)
-    //letterRecognition(full)
+    letterRecognition(full)
   }
 
     // Run everything for the steel faults classification problem.
@@ -95,24 +95,95 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
-    val (train, test) = splitTrainTest(split, faults)
+    val iters = if (full) 50000 else 500
+    val runs = 1
+    val nodeList = List(10, 20, 30)
+    runTestMatrix("faults", faultsOutput, split, nodeList, runs, iters, faults, algos)
+  }
+
+  // Run everything for the steel letter recognition problem.
+  def letterRecognition(full : Boolean) {
+    val lettersFile = "letter-recognition.data"
+    //val lettersOutput = "letters-nn6.json"
+    val lettersOutput = "letters-nn-dummy.json"
+
+    // Letter recognition is normal CSV; first field is output (it's a
+    // character), 16 fields after are inputs:
+    println(s"Reading $lettersFile:")
+    val lettersRaw = CSVReader.open(lettersFile).all().map( row => {
+      // Output is a character from A-Z, so we turn it to 26 outputs:
+      val letterClass = { (idx : Int) =>
+        if ((row(0)(0).toInt - 65) == idx) 1.0 else 0.0
+      }
+      (row.slice(1, 17).map( x => x.toDouble ), // input
+        (0 to 25).map(letterClass)) // output
+    })
+    val lettersCond = conditionAttribs(lettersRaw)
+    val letters = if (full) lettersCond else
+      lettersCond.take((0.05 * lettersCond.size).toInt)
+
+    val lettersRows = letters.size
+    println(f"Read $lettersRows%d rows.")
+
+    val algos = List(
+      ("RHC", x => new RandomizedHillClimbing(x))
+      /*("SA, 1e12 & 0.99", x => new SimulatedAnnealing(1e12, 0.99, x)),
+      ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
+      ("SA, 1e8 & 0.99", x => new SimulatedAnnealing(1e8, 0.99, x)),
+      ("SA, 1e12 & 0.98", x => new SimulatedAnnealing(1e12, 0.98, x)),
+      ("SA, 1e10 & 0.98", x => new SimulatedAnnealing(1e10, 0.98, x)),
+      ("SA, 1e8 & 0.98", x => new SimulatedAnnealing(1e8, 0.98, x))*/
+      //("SA, 1e11 & 0.90", x => new SimulatedAnnealing(1e11, 0.90, x)),
+      //("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x))
+      //("SA, 1e10 & 0.90", x => new SimulatedAnnealing(1e10, 0.90, x))
+    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+    val split = 0.75
+    val iters = if (full) 50000 else 500
+    val runs = 1
+    val nodeList = List(10, 20, 30)
+    runTestMatrix("letters", lettersOutput, split, nodeList, runs, iters, letters, algos)
+  }
+
+  // Run an entire matrix of tests.
+  // name: Name of this overall test matrix (will appear in JSON)
+  // filename: Output JSON file
+  // split: The training/test split ratio
+  // hiddenNodeList: Numbers of hidden nodes to try (one hidden layer only)
+  // numRuns: Total number of runs to do
+  // iters: Number of iterations to run
+  // data: Dataset to use
+  // algos: List of names & algorithms (by way of OptimizationAlgorithm)
+  def runTestMatrix(
+    name: String,
+    filename: String,
+    split: Double,
+    hiddenNodeList: List[Int],
+    numRuns: Int,
+    iters: Int,
+    data: List[Instance],
+    algos: List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)]
+  )
+  {
+    // Get size of input & output:
+    val inputs = data(0).size()
+    val outputs = data(0).getLabel().size()
+    println(s"Using $inputs inputs, $outputs outputs")
+    val (train, test) = splitTrainTest(split, data)
     val trainSize = train.size
     val testSize = test.size
-    val iters = if (full) 50000 else 500
-    val runs = (1 to 10)
-    val nodeList = List(10, 20, 30)
     println(s"Training: $trainSize, testing: $testSize")
-    val results = algos.flatMap { case (name,algo) =>
-      runs.flatMap { run =>
-        nodeList.map { hiddenNodes =>
+    val results = algos.flatMap { case (algoName,algo) =>
+      (1 to numRuns).flatMap { run =>
+        hiddenNodeList.map { hiddenNodes =>
           val f: Future[List[ErrorResult]] = Future {
-            println(s"Starting $name, run $run, $hiddenNodes nodes")
-            val nodeCfg = Array(27, hiddenNodes, 7)
+            println(s"Starting $name, $algoName, run $run, $hiddenNodes nodes")
+            val nodeCfg = Array(inputs, hiddenNodes, outputs)
             val factory = new BackPropagationNetworkFactory()
             val testNet = factory.createClassificationNetwork(nodeCfg, new LogisticSigmoid())
             val nets = optimizeNN(train, nodeCfg, iters, algo)
             val r = nets.map { case (iter,weights) =>
-              val ctxt = TestParams("faults", name, split, hiddenNodes, run, iter)
+              val ctxt = TestParams(name, algoName, split, hiddenNodes, run, iter)
               testNet.setWeights(weights)
               val trainErr = nnBinaryError(train, testNet)
               val testErr = nnBinaryError(test, testNet)
@@ -128,8 +199,8 @@ object RandomizedOptimization {
 
     val algoList = algos.map(_._1)
     val date = Calendar.getInstance().getTime()
-    val testId = f"Steel faults classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
-    val writer = new PrintWriter(new File(faultsOutput))
+    val testId = f"$name, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $hiddenNodeList"
+    val writer = new PrintWriter(new File(filename))
     writeJsonHeader(writer, testId)
 
     var done = 0
@@ -156,89 +227,6 @@ object RandomizedOptimization {
     writeJsonEnd(writer)
     writer.close()
   }
-
-  /*
-  // Run everything for the steel letter recognition problem.
-  def letterRecognition(full : Boolean) {
-    val lettersFile = "letter-recognition.data"
-    //val lettersOutput = "letters-nn6.json"
-    val lettersOutput = "letters-nn-dummy.json"
-
-    // Letter recognition is normal CSV; first field is output (it's a
-    // character), 16 fields after are inputs:
-    println(s"Reading $lettersFile:")
-    val lettersRaw = CSVReader.open(lettersFile).all().map( row => {
-      // Output is a character from A-Z, so we turn it to 26 outputs:
-      val letterClass = { (idx : Int) =>
-        if ((row(0)(0).toInt - 65) == idx) 1.0 else 0.0
-      }
-      (row.slice(1, 17).map( x => x.toDouble ), // input
-        (0 to 26).map(letterClass)) // output
-    })
-    val lettersCond = conditionAttribs(lettersRaw)
-    val letters = if (full) lettersCond else
-      lettersCond.take((0.05 * lettersCond.size).toInt)
-
-    val lettersRows = letters.size
-    println(f"Read $lettersRows%d rows.")
-
-    val algos = List(
-      //("RHC", x => new RandomizedHillClimbing(x)),
-      ("SA, 1e12 & 0.99", x => new SimulatedAnnealing(1e12, 0.99, x)),
-      ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
-      ("SA, 1e8 & 0.99", x => new SimulatedAnnealing(1e8, 0.99, x)),
-      ("SA, 1e12 & 0.98", x => new SimulatedAnnealing(1e12, 0.98, x)),
-      ("SA, 1e10 & 0.98", x => new SimulatedAnnealing(1e10, 0.98, x)),
-      ("SA, 1e8 & 0.98", x => new SimulatedAnnealing(1e8, 0.98, x))
-      //("SA, 1e11 & 0.90", x => new SimulatedAnnealing(1e11, 0.90, x)),
-      //("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x))
-      //("SA, 1e10 & 0.90", x => new SimulatedAnnealing(1e10, 0.90, x))
-    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
-
-    val split = 0.75
-    val (train, test) = splitTrainTest(split, letters)
-    val iters = if (full) 100000 else 200
-    val runs = (1 to 1)
-    val nodeList = List(60)
-    // Kludge alert:
-    var weights = scala.collection.mutable.ListBuffer.empty[TrainWeights]
-    // We append to this in the loop below because I don't really know
-    // of another good way to do this.
-    val results = algos.par.flatMap { case (name,algo) =>
-      runs.par.flatMap { run =>
-        nodeList.par.flatMap { hiddenNodes =>
-          println(s"Starting $name, run $run, $hiddenNodes nodes")
-          val nodeCfg = List(16, hiddenNodes, 26)
-          val nets = optimizeNN(train, nodeCfg, algo)
-          nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
-            val ctxt = TestParams("letters", name, split, hiddenNodes, run, iter)
-            val trainErr = nnBinaryError(train, bpn)
-            val testErr = nnBinaryError(test, bpn)
-            val testRec = ErrorResult(ctxt, trainErr, testErr)
-            if (iter % 100 == 0)
-              println(testRec)
-            if (iter == (iters - 1)) {
-              val w = bpn.getWeights
-              val wsize = w.size
-              println(s"Saving $wsize weights...")
-              weights += TrainWeights(ctxt, w)
-            }
-            List(testRec)
-          }
-        }
-      }
-    }
-
-    {
-      val algoList = algos.map(_._1)
-      val date = Calendar.getInstance().getTime()
-      val testId = f"Letters classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
-      val writer = new PrintWriter(new File(lettersOutput))
-      writeJson(writer, testId, weights, results)
-      writer.close()
-    }
-  }
-   */
 
   // Override implicit object CSVReader.open uses & change delimiter:
   def tabReader(fname : String) : CSVReader =
@@ -436,7 +424,7 @@ object RandomizedOptimization {
   // values, normalized on each attribute, and labeled with the
   // outputs.  Outputs are assumed to require no normalization.
   def conditionAttribs(in: Iterable[(Iterable[Double], Iterable[Double])]) :
-      Iterable[Instance] =
+      List[Instance] =
   {
     // 'in' contains a list of tuples, one tuple per *row* of data.
     // 'inTrans' separates this out into a list of lists and then
@@ -452,7 +440,7 @@ object RandomizedOptimization {
     // 'inNormed':
     val out = in.map { t => t._2 }
     // Finally, turn these into a form ABAGAIL will take:
-    inNormed.zip(out).map { case (in, out) => instance(in, out) }
+    inNormed.zip(out).map { case (in, out) => instance(in, out) }.toList
   }
 
 }
