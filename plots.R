@@ -10,28 +10,36 @@
 library(jsonlite);
 library(ggplot2);
 
-faults <- fromJSON("faults-nn-200runs.json");
+jsonDump <- fromJSON("faults-nn14.json");
+data <- jsonDump$data
+## data <- fromJSON("letters-nn-normed2.json");
+## This decimates the plot, but I'm not sure if it does it well (it
+## won't do it per-test):
+skip <- 20
+data10 <- data[seq(1,nrow(data),by=skip),]
 
-faultsAgg <- aggregate(
-    . ~ hiddenNodes + iter,
-    subset(faults, select=c(testErr, trainErr, hiddenNodes, iter)),
+dataAgg <- aggregate(
+    . ~ hiddenNodes + iter + name,
+    subset(data10, select=c(testErr, trainErr, hiddenNodes, iter, name)),
     mean);
 
 ## Turn training error & testing error into separate entries:
-faultsTrainErr <- data.frame(error       = faultsAgg$trainErr,
-                             iter        = faultsAgg$iter,
-                             hiddenNodes = faultsAgg$hiddenNodes,
-                             stage       = "Train");
-faultsTestErr <- data.frame(error       = faultsAgg$testErr,
-                            iter        = faultsAgg$iter,
-                            hiddenNodes = faultsAgg$hiddenNodes,
-                            stage       = "Test");
-faultsAgg2 = rbind(faultsTrainErr, faultsTestErr);
-faultsAgg2["Hidden nodes"] <- sprintf("%d", faultsAgg2$hiddenNodes);
+dataTrainErr <- data.frame(error       = dataAgg$trainErr,
+                           iter        = dataAgg$iter,
+                           hiddenNodes = dataAgg$hiddenNodes,
+                           name        = dataAgg$name,
+                           stage       = "Train");
+dataTestErr <- data.frame(error       = dataAgg$testErr,
+                          iter        = dataAgg$iter,
+                          hiddenNodes = dataAgg$hiddenNodes,
+                          name        = dataAgg$name,
+                          stage       = "Test");
+dataAgg2 = rbind(dataTrainErr, dataTestErr);
+dataAgg2["Hidden nodes"] <- sprintf("%d", dataAgg2$hiddenNodes);
 
-ggplot(data = faultsAgg2,
-       aes(x=iter, y=error, group=interaction(stage, `Hidden nodes`))) +
-    geom_line(aes(linetype=stage, colour=`Hidden nodes`)) +
+ggplot(data = dataAgg2,
+       aes(x=iter, y=error, group=interaction(stage, name, hiddenNodes))) +
+    geom_line(aes(linetype=stage, colour=interaction(name, hiddenNodes))) +
     xlab("Iterations") +
     ylab("Error (ratio of incorrect classification)") +
-    ggtitle("Learning curve (steel faults)");
+    ggtitle(jsonDump$testId);
