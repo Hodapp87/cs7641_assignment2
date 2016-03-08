@@ -42,7 +42,7 @@ object RandomizedOptimization {
     // If 'true', then use the full datasets; if false, then greatly
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
-    val full = true;
+    val full = false;
     steelFaults(full)
     //letterRecognition(full)
   }
@@ -54,7 +54,7 @@ object RandomizedOptimization {
     // Input & output filenames
     // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn17.json"
+    val faultsOutput = "faults-nn18.json"
     
     // --------------------------------------------------------------------
     // Data loading and conditioning
@@ -81,10 +81,10 @@ object RandomizedOptimization {
     // --------------------------------------------------------------------
 
     val algos = List(
-      ("RHC", x => new RandomizedHillClimbing(x)),
-      ("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
-      ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
-      ("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x))
+      ("RHC", x => new RandomizedHillClimbing(x))
+      //("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
+      //("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
+      //("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x))
       //("SA, 1e12 & 0.90", x => new SimulatedAnnealing(1e11, 0.95, x)),
       /*("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
       ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
@@ -100,7 +100,7 @@ object RandomizedOptimization {
     val testSize = test.size
     val iters = if (full) 50000 else 500
     val runs = (1 to 10)
-    val nodeList = List(10, 20)
+    val nodeList = List(10, 20, 30)
     println(s"Training: $trainSize, testing: $testSize")
     val results = algos.flatMap { case (name,algo) =>
       runs.flatMap { run =>
@@ -132,13 +132,24 @@ object RandomizedOptimization {
     val writer = new PrintWriter(new File(faultsOutput))
     writeJsonHeader(writer, testId)
 
+    var done = 0
+    var failed = 0
     results.map { fut =>
-      fut onSuccess { case result =>
-        writeJsonRecords(writer, result)
-        val numResults = result.size
-        println(s"Wrote $numResults results.")
+      fut onSuccess { case records =>
+        writeJsonRecords(writer, records)
+        val numRecs = records.size
+        val numResults = results.size
+        done = done + 1
+        println(s"Wrote $numRecs records")
+        println(s"$done done, $failed failed, of $numResults.")
       }
-      fut onFailure { case t => println("Error with result: " + t.getMessage) }
+      fut onFailure { case t =>
+        done = done + 1
+        failed = failed + 1
+        val numResults = results.size
+        println("Error with result: " + t.getMessage)
+        println(s"$done done, $failed failed, of $numResults.")
+      }
     }
 
     Await.result(Future.sequence(results), Duration.Inf)
@@ -316,7 +327,7 @@ object RandomizedOptimization {
       opt.train()
       val w = opt.getOptimal().getData()
       net.setWeights(w)
-      if (i % 100 == 0) println(s"$i/$iters...")
+      if (i % 500 == 0) println(s"$i/$iters...")
       if (i % 10 == 0) Some((i, net.getWeights)) else None
     }.toList
   }
