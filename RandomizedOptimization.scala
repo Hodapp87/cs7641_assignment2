@@ -30,24 +30,30 @@ import opt.prob.ProbabilisticOptimizationProblem
 import shared._
 import util.linalg.Vector
 
+// Scala dependencies:
+import scala.concurrent._
+import scala.concurrent.duration._
+import ExecutionContext.Implicits.global
+
 object RandomizedOptimization {
 
-  def main(args: Array[String]) {
+  def main(args: Array[String])
+  {
     // If 'true', then use the full datasets; if false, then greatly
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
-    val full = false;
-    letterRecognition(full)
+    val full = true;
     steelFaults(full)
+    //letterRecognition(full)
   }
 
     // Run everything for the steel faults classification problem.
-  def steelFaults(full : Boolean) {
+  def steelFaults(full : Boolean)
+  {
     // --------------------------------------------------------------------
     // Input & output filenames
     // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    //val faultsOutput = "faults-nn9.json"
     val faultsOutput = "faults-nn-dummy.json"
     
     // --------------------------------------------------------------------
@@ -75,17 +81,17 @@ object RandomizedOptimization {
     // --------------------------------------------------------------------
 
     val algos = List(
-      /*("RHC", x => new RandomizedHillClimbing(x)),
-      ("SA, 1e11 & 0.90", x => new SimulatedAnnealing(1e11, 0.90, x)),
-      ("SA, 1e11 & 0.95", x => new SimulatedAnnealing(1e11, 0.95, x)),
-      ("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x)),
-      ("SA, 1e12 & 0.90", x => new SimulatedAnnealing(1e11, 0.95, x)),*/
-      ("GA, 125, 88, 38", x => new StandardGeneticAlgorithm(125, 88, 38, x)),
-      ("GA, 250, 175, 75", x => new StandardGeneticAlgorithm(250, 175, 75, x)),
-      ("GA, 500, 350, 150", x => new StandardGeneticAlgorithm(500, 350, 150, x)),
-      ("GA, 125, 113, 38", x => new StandardGeneticAlgorithm(125, 113, 38, x)),
-      ("GA, 250, 225, 75", x => new StandardGeneticAlgorithm(250, 225, 75, x)),
-      ("GA, 500, 450, 150", x => new StandardGeneticAlgorithm(500, 450, 150, x))
+      ("RHC", x => new RandomizedHillClimbing(x)),
+      ("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
+      ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
+      ("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x))
+      //("SA, 1e12 & 0.90", x => new SimulatedAnnealing(1e11, 0.95, x)),
+      /*("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
+      ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
+      ("GA, 120, 84, 12", x => new StandardGeneticAlgorithm(120, 84, 12, x)),
+      ("GA, 120, 84, 36", x => new StandardGeneticAlgorithm(120, 84, 36, x))*/
+      //("GA, 250, 225, 75", x => new StandardGeneticAlgorithm(250, 225, 75, x)),
+      //("GA, 500, 450, 150", x => new StandardGeneticAlgorithm(500, 450, 150, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
@@ -93,51 +99,54 @@ object RandomizedOptimization {
     val trainSize = train.size
     val testSize = test.size
     val iters = if (full) 10000 else 500
-    val runs = (1 to 1)
-    val nodeList = List(20)
-    // Kludge alert:
-    var weights = scala.collection.mutable.ListBuffer.empty[TrainWeights]
-    // We append to this in the loop below because I don't really know
-    // of another good way to do this.
+    val runs = (1 to 2)
+    val nodeList = List(10)
     println(s"Training: $trainSize, testing: $testSize")
-    val results = algos.par.flatMap { case (name,algo) =>
-      runs.par.flatMap { run =>
-        nodeList.par.flatMap { hiddenNodes =>
-          println(s"Starting $name, run $run, $hiddenNodes nodes")
-          val nets = optimizeNN(train, List(27, hiddenNodes, 7), algo)
-          nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
-            val ctxt = TestParams("faults", name, split, hiddenNodes, run, iter)
-            val trainErr = nnBinaryError(train, bpn)
-            val testErr = nnBinaryError(test, bpn)
-            val testRec = ErrorResult(ctxt, trainErr, testErr)
-            if (iter % 100 == 0)
-              println(testRec)
-            if (iter == (iters - 1)) {
-              val w = bpn.getWeights
-              val wsize = w.size
-              println(s"Saving $wsize weights...")
-              weights += TrainWeights(ctxt, w)
+    val results = algos.flatMap { case (name,algo) =>
+      runs.flatMap { run =>
+        nodeList.map { hiddenNodes =>
+          val f: Future[List[ErrorResult]] = Future {
+            println(s"Starting $name, run $run, $hiddenNodes nodes")
+            val nodeCfg = Array(27, hiddenNodes, 7)
+            val factory = new BackPropagationNetworkFactory()
+            val testNet = factory.createClassificationNetwork(nodeCfg, new LogisticSigmoid())
+            val nets = optimizeNN(train, nodeCfg, iters, algo)
+            val r = nets.map { case (iter,weights) =>
+              val ctxt = TestParams("faults", name, split, hiddenNodes, run, iter)
+              testNet.setWeights(weights)
+              val trainErr = nnBinaryError(train, testNet)
+              val testErr = nnBinaryError(test, testNet)
+              ErrorResult(ctxt, trainErr, testErr)
             }
-            List(testRec)
+            println(s"Finished $name, run $run, $hiddenNodes nodes")
+            r
           }
+          f
         }
       }
     }
 
-    {
-      val algoList = algos.map(_._1)
-      val date = Calendar.getInstance().getTime()
-      val testId = f"Steel faults classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
-      val writer = new PrintWriter(new File(faultsOutput))
-      writeJson(writer, testId, weights, results)
-      writer.close()
+    val algoList = algos.map(_._1)
+    val date = Calendar.getInstance().getTime()
+    val testId = f"Steel faults classification, started on $date, algorithms: $algoList, $split%.3f split, $iters iterations, hidden nodes tested: $nodeList"
+    val writer = new PrintWriter(new File(faultsOutput))
+    writeJsonHeader(writer, testId)
+
+    results.map { fut =>
+      fut onSuccess { case result =>
+        writeJsonRecords(writer, result)
+        val numResults = result.size
+        println(s"Wrote $numResults results.")
+      }
+      fut onFailure { case t => println("Error with result: " + t.getMessage) }
     }
 
-    //for (w <- net.getWeights()) {
-    //  println(w)
-    //}
+    Await.result(Future.sequence(results), Duration.Inf)
+    writeJsonEnd(writer)
+    writer.close()
   }
 
+  /*
   // Run everything for the steel letter recognition problem.
   def letterRecognition(full : Boolean) {
     val lettersFile = "letter-recognition.data"
@@ -188,7 +197,8 @@ object RandomizedOptimization {
       runs.par.flatMap { run =>
         nodeList.par.flatMap { hiddenNodes =>
           println(s"Starting $name, run $run, $hiddenNodes nodes")
-          val nets = optimizeNN(train, List(16, hiddenNodes, 26), algo)
+          val nodeCfg = List(16, hiddenNodes, 26)
+          val nets = optimizeNN(train, nodeCfg, algo)
           nets.zipWithIndex.take(iters).flatMap { case (bpn,iter) =>
             val ctxt = TestParams("letters", name, split, hiddenNodes, run, iter)
             val trainErr = nnBinaryError(train, bpn)
@@ -217,9 +227,11 @@ object RandomizedOptimization {
       writer.close()
     }
   }
+   */
 
   // Override implicit object CSVReader.open uses & change delimiter:
-  def tabReader(fname : String) : CSVReader = {
+  def tabReader(fname : String) : CSVReader =
+  {
     implicit object TabFormat extends DefaultCSVFormat {
       override val delimiter = '\t'
     }
@@ -261,7 +273,8 @@ object RandomizedOptimization {
 
   // Compute the average error for a neural network, assuming that all
   // outputs are exclusive binary categories.
-  def nnBinaryError(set: DataSet, nn : BackPropagationNetwork) : Double = {
+  def nnBinaryError(set: DataSet, nn : BackPropagationNetwork) : Double =
+  {
     val size = set.size()
     // Tally up how many outputs are incorrect:
     val incorrect = set.getInstances().map(inst => {
@@ -282,30 +295,30 @@ object RandomizedOptimization {
   }
 
   // Given a training dataset, number of nodes at each layer of the
-  // neural network, and a function which produces an
-  // OptimizationAlgorithm, construct a neural network and train it
-  // one step at a time with the returned OptimizationAlgorithm.  This
-  // returns a Stream of neural networks (with the weights updated
-  // each time).
+  // neural network, max number of iterations, and a function which
+  // produces an OptimizationAlgorithm, construct a neural network and
+  // train it one step at a time with the returned
+  // OptimizationAlgorithm.  This returns a List of (iteration,
+  // weights).
   def optimizeNN(
     set: DataSet,
     nodes: Iterable[Int],
+    iters: Int,
     optFn: NeuralNetworkOptimizationProblem => OptimizationAlgorithm) :
-      Stream[BackPropagationNetwork] =
+      List[(Int, Array[Double])] =
   {
     // Build neural network & OptimizationAlgorithm:
     val (net, prob) = getNeuralNet(set, nodes)
     val opt = optFn(prob)
 
-    // At every step:
-    def next() : Stream[BackPropagationNetwork] = {
+    (1 to iters).flatMap { i =>
       // Train the network one more step & use the updated weights:
       opt.train()
-      net.setWeights(opt.getOptimal().getData())
-      // Put that at the head of the (lazy) list:
-      net #:: next ()
-    }
-    next ()
+      val w = opt.getOptimal().getData()
+      net.setWeights(w)
+      if (i % 100 == 0) println(s"$i/$iters...")
+      if (i % 10 == 0) Some((i, net.getWeights)) else None
+    }.toList
   }
 
   // Class giving the parameters/context for some piece of information
@@ -347,13 +360,11 @@ object RandomizedOptimization {
       jEmptyObject
     })
 
-  // Write the given records to the Writer (which will not be closed).
-  // TODO: Make all of this more general.  I'm using 'for' (via
-  // 'flatMap', I think), 'take', and 'drop' on the ParSeq, and there
-  // is a more general trait I can use, but I don't know how.
-  def writeJson(f: Writer, testId: String,
-    weights: Iterable[TrainWeights],
-    errors: scala.collection.parallel.immutable.ParSeq[ErrorResult])
+  // Write the start of a JSON file into 'f', given a string for test
+  // ID.  The next call must be 'writeJsonEnd' or 'writeJsonRecords'.
+  // The point of this is to make a JSON file that jsonlite for R will
+  // read.
+  def writeJsonHeader(f: Writer, testId: String)
   {
     // First, write out the test ID:
     f.write("{")
@@ -365,22 +376,37 @@ object RandomizedOptimization {
     f.flush()
     // This is sort of manually writing the array because of
     // https://github.com/argonaut-io/argonaut/issues/52
-    f.write(",\"data\": [")
-    // The first record must be written with no leading commo:
-    f.write(errors.apply(0).asJson.spaces2)
-    // ...so that the rest can all be written with a leading comma,
-    // and then regardless of the order, come out fine:
-    for (r <- errors.drop(1)) {
+    f.write(",\"data\": [{}")
+    // The commas must be right in the other records, but when I write
+    // things in parallel I don't have any good way of specifying what
+    // the "first" record is - so I can't just always write a leading
+    // comma, or always write a trailing comma.  So, instead, I just
+    // insert an initial dummy record, and then it doesn't matter.
+  }
+
+  // Write a list of ErrorResult to the JSON file; this assumes that
+  // 'writeJsonHeader' has been called already, and assumes that you
+  // will call 'writeJsonEnd' after all records are written.
+  def writeJsonRecords(f: Writer, errors: Iterable[ErrorResult])
+  {
+    for (r <- errors.zipWithIndex) {
       f.write("," + r.asJson.spaces2)
       f.flush()
     }
-    f.write("],\"weights\": ")
-    f.write(jArray(weights.map(w => w.asJson).toList).spaces2)
-    f.write("}")
+  }
+
+  // Write the ending of the JSON data (after a call to
+  // 'writeJsonHeader' and any number of calls to 'writeJsonRecords'),
+  // and close the file.
+  def writeJsonEnd(f: Writer)
+  {
+    f.write("]}")
+    f.close()
   }
 
   // Normalize the given data to have mean of 0 and variance of 1.
-  def normalize(data: Iterable[Double]) : Iterable[Double] = {
+  def normalize(data: Iterable[Double]) : Iterable[Double] =
+  {
     val mean = data.sum / data.size
     val meanZero = data.map( d => d - mean )
     val variance = meanZero.map( d => d*d ).sum / data.size

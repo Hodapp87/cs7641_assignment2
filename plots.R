@@ -10,12 +10,12 @@
 library(jsonlite);
 library(ggplot2);
 
-jsonDump <- fromJSON("faults-nn14.json");
+jsonDump <- fromJSON("faults-nn-dummy.json");
 data <- jsonDump$data
 ## data <- fromJSON("letters-nn-normed2.json");
 ## This decimates the plot, but I'm not sure if it does it well (it
 ## won't do it per-test):
-skip <- 20
+skip <- 0
 data10 <- data[seq(1,nrow(data),by=skip),]
 
 dataAgg <- aggregate(
