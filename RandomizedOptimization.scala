@@ -180,18 +180,19 @@ object RandomizedOptimization {
     val mf = new DiscreteChangeOneMutation(ranges)
     val gap = new GenericGeneticAlgorithmProblem(ef, odd, mf, cf)
 
-    val df = new DiscreteDependencyTree(.1, ranges)
-    val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
-
     val algos = List(
-      ("RHC", 200000, () => new RandomizedHillClimbing(hcp)),
-      ("SA, 1e10 & 0.99", 200000, () => new SimulatedAnnealing(1e10, .99, hcp)),
-      ("GA, 200, 150, 25", 1000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
-      ("MIMIC, 200, 100", 1000, () => new MIMIC(200, 100, pop))
+      ("RHC", 3000, () => new RandomizedHillClimbing(hcp)),
+      ("SA, 1e10 & 0.99", 3000, () => new SimulatedAnnealing(1e10, .99, hcp)),
+      ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
+      ("MIMIC, 200, 100", 2000, () => {
+        val df = new DiscreteDependencyTree(.1, ranges)
+        val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+        new MIMIC(200, 100, pop)
+      })
     ) : List[(String, Int, () => OptimizationAlgorithm)];
     // (Name, iters, algorithm)
 
-    runOptimizationTestMatrix("knapsack", "", 10, ef, algos)
+    runOptimizationTestMatrix("knapsack", "knapsack01.json", 20, ef, algos)
   }
 
   // Run an entire matrix of neural network training tests.
@@ -238,6 +239,7 @@ object RandomizedOptimization {
               val testErr = nnBinaryError(test, testNet)
               ErrorResult(ctxt, trainErr, testErr)
             }
+            val t1 = System.nanoTime()
             println(s"Finished $name, run $run, $hiddenNodes nodes")
             r
           }
@@ -295,25 +297,70 @@ object RandomizedOptimization {
   )
   {
     val results = algos.flatMap { case (algoName, iters, algoFn) =>
-      (1 to numRuns).flatMap { run =>
+      (1 to numRuns).map { run =>
         val algo = algoFn()
-        //val f: Future[List[ErrorResult]] = Future {
+        val f: Future[Iterable[OptimizationResult]] = Future {
           println(s"Starting $name, $algoName, run $run, $iters iterations")
 
-          (1 to iters).map { iter =>
+          val t0 = System.nanoTime()
+          val history = (1 to iters).flatMap { iter =>
             algo.train()
-            if (iter % 100 == 0) {
+            if (iter % 250 == 0) {
               val opt = ef.value(algo.getOptimal())
               println(f"$name, $algoName, $iter/$iters: $opt")
             }
+            if (iter % 10 == 0) {
+              val opt = ef.value(algo.getOptimal())
+              Some(OptimizationResult(name, algoName, run, iter, opt))
+            } else None
           }
           val opt = ef.value(algo.getOptimal())
-          println(f"$name final: $opt")
-          None
-        //}
-        //f
+          val t1 = (System.nanoTime() - t0) / 1e9
+          println(f"$name, $algoName, run $run, final ($t1%.2f seconds): $opt")
+          history
+        }
+        f
       }
     }
+
+    // TODO: The below is identical to runNeuralNetTestMatrix except
+    // for some different status strings, and which JSON writing call
+    // is used.  If I can get a single writeJsonRecords call with the
+    // polymorphism I need (see comments near it), I can factor this
+    // out easily.
+
+    val algoList = algos.map(_._1)
+    val date = Calendar.getInstance().getTime()
+    val testId = f"$name, started on $date, algorithms: $algoList"
+    val writer = new PrintWriter(new File(filename))
+    writeJsonHeader(writer, testId)
+
+    var done = 0
+    var failed = 0
+    // This Future returns when all either have written or failed:
+    val allWritten = Future.sequence (results.map { fut =>
+      val written = fut.map { records =>
+        writeJsonOptimizationResult(writer, records)
+        val numRecs = records.size
+        val numResults = results.size
+        done = done + 1
+        println(s"Wrote $numRecs records")
+        println(s"$done done, $failed failed, of $numResults.")
+      }
+      written onFailure { case t =>
+        done = done + 1
+        failed = failed + 1
+        val numResults = results.size
+        println("Error with result: " + t.getMessage)
+        println(s"$done done, $failed failed, of $numResults.")
+      }
+      written
+    })
+
+    // Only once all others are done (including writing), close the file:
+    Await.result(allWritten, Duration.Inf)
+    writeJsonEnd(writer)
+    writer.close()
   }
 
   // Override implicit object CSVReader.open uses & change delimiter:
@@ -425,8 +472,24 @@ object RandomizedOptimization {
       ("split"       := jNumber(ctxt.split))       ->:
       ("hiddenNodes" := jNumber(ctxt.hiddenNodes)) ->:
       ("iter"        := jNumber(ctxt.iter))        ->:
+      // TODO: Factor out all of the above.
       ("trainErr"    := jNumber(p.trainErr))       ->:
       ("testErr"     := jNumber(p.testErr))        ->:
+      jEmptyObject
+    })
+
+  // Class giving the optimization value in some context
+  case class OptimizationResult(test: String, name: String, run: Int,
+      iter: Int, value: Double)
+
+  implicit def OptimizationResultJson: EncodeJson[OptimizationResult] =
+    EncodeJson((p: OptimizationResult) => {
+      ("test"        := jString(p.test))  ->:
+      ("name"        := jString(p.name))  ->:
+      ("run"         := jNumber(p.run))   ->:
+      ("iter"        := jNumber(p.iter))  ->:
+      // TODO: Factor out all of the above.
+      ("value"       := jNumber(p.value)) ->:
       jEmptyObject
     })
 
@@ -475,6 +538,18 @@ object RandomizedOptimization {
   // 'writeJsonHeader' has been called already, and assumes that you
   // will call 'writeJsonEnd' after all records are written.
   def writeJsonRecords(f: Writer, errors: Iterable[ErrorResult])
+  {
+    for (r <- errors) {
+      f.write("," + r.asJson.spaces2)
+      f.flush()
+    }
+  }
+
+  // writeJsonRecords, but for OptimizationResult.  Yes, this is
+  // atrocious, but I don't know Scala very well.  I need to figure
+  // out how to make an Iterable that is full of items with some
+  // trait.
+  def writeJsonOptimizationResult(f: Writer, errors: Iterable[OptimizationResult])
   {
     for (r <- errors) {
       f.write("," + r.asJson.spaces2)
