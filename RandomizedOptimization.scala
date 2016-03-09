@@ -145,15 +145,6 @@ object RandomizedOptimization {
 
     val algos = List(
       ("RHC", x => new RandomizedHillClimbing(x))
-      /*("SA, 1e12 & 0.99", x => new SimulatedAnnealing(1e12, 0.99, x)),
-      ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
-      ("SA, 1e8 & 0.99", x => new SimulatedAnnealing(1e8, 0.99, x)),
-      ("SA, 1e12 & 0.98", x => new SimulatedAnnealing(1e12, 0.98, x)),
-      ("SA, 1e10 & 0.98", x => new SimulatedAnnealing(1e10, 0.98, x)),
-      ("SA, 1e8 & 0.98", x => new SimulatedAnnealing(1e8, 0.98, x))*/
-      //("SA, 1e11 & 0.90", x => new SimulatedAnnealing(1e11, 0.90, x)),
-      //("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x))
-      //("SA, 1e10 & 0.90", x => new SimulatedAnnealing(1e10, 0.90, x))
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
@@ -180,37 +171,30 @@ object RandomizedOptimization {
     val volumes = (1 to numItems).map( _ => r.nextDouble * maxVolume).toArray
     val ranges = Array.fill[Int](numItems)(copiesEach + 1)
     val ef = new KnapsackEvaluationFunction(weights, volumes, knapsackVolume, copies)
+
     val odd = new DiscreteUniformDistribution(ranges)
     val nf = new DiscreteChangeOneNeighbor(ranges)
-    val mf = new DiscreteChangeOneMutation(ranges)
-    val cf = new UniformCrossOver()
-    val df = new DiscreteDependencyTree(.1, ranges)
     val hcp = new GenericHillClimbingProblem(ef, odd, nf)
+
+    val cf = new UniformCrossOver()
+    val mf = new DiscreteChangeOneMutation(ranges)
     val gap = new GenericGeneticAlgorithmProblem(ef, odd, mf, cf)
+
+    val df = new DiscreteDependencyTree(.1, ranges)
     val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
 
-    val rhc = new RandomizedHillClimbing(hcp)
-    val fit = new FixedIterationTrainer(rhc, 200)
-    fit.train()
-    println(ef.value(rhc.getOptimal()))
+    val algos = List(
+      ("RHC", 200000, () => new RandomizedHillClimbing(hcp)),
+      ("SA, 1e10 & 0.99", 200000, () => new SimulatedAnnealing(1e10, .99, hcp)),
+      ("GA, 200, 150, 25", 1000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
+      ("MIMIC, 200, 100", 1000, () => new MIMIC(200, 100, pop))
+    ) : List[(String, Int, () => OptimizationAlgorithm)];
+    // (Name, iters, algorithm)
 
-    val sa = new SimulatedAnnealing(1e10, .99, hcp)
-    val fit2 = new FixedIterationTrainer(sa, 200000)
-    fit2.train()
-    println(ef.value(sa.getOptimal()))
-
-    val ga = new StandardGeneticAlgorithm(200, 150, 25, gap)
-    val fit3 = new FixedIterationTrainer(ga, 1000)
-    fit3.train()
-    println(ef.value(ga.getOptimal()))
-
-    val mimic = new MIMIC(200, 100, pop)
-    val fit4 = new FixedIterationTrainer(mimic, 1000)
-    fit4.train()
-    println(ef.value(mimic.getOptimal()))
+    runOptimizationTestMatrix("knapsack", "", 10, ef, algos)
   }
 
-  // Run an entire matrix of tests.
+  // Run an entire matrix of neural network training tests.
   // name: Name of this overall test matrix (will appear in JSON)
   // filename: Output JSON file
   // split: The training/test split ratio
@@ -294,6 +278,42 @@ object RandomizedOptimization {
     Await.result(allWritten, Duration.Inf)
     writeJsonEnd(writer)
     writer.close()
+  }
+
+  // Run an entire matrix of optimization tests.
+  // name: Name of this overall test matrix (will appear in JSON)
+  // filename: Output JSON file
+  // numRuns: Total number of runs to do
+  // ef: EvaluationFunction to run
+  // algos: List of names, iterations, & algorithms
+  def runOptimizationTestMatrix(
+    name: String,
+    filename: String,
+    numRuns: Int,
+    ef: EvaluationFunction,
+    algos: List[(String, Int, () => OptimizationAlgorithm)]
+  )
+  {
+    val results = algos.flatMap { case (algoName, iters, algoFn) =>
+      (1 to numRuns).flatMap { run =>
+        val algo = algoFn()
+        //val f: Future[List[ErrorResult]] = Future {
+          println(s"Starting $name, $algoName, run $run, $iters iterations")
+
+          (1 to iters).map { iter =>
+            algo.train()
+            if (iter % 100 == 0) {
+              val opt = ef.value(algo.getOptimal())
+              println(f"$name, $algoName, $iter/$iters: $opt")
+            }
+          }
+          val opt = ef.value(algo.getOptimal())
+          println(f"$name final: $opt")
+          None
+        //}
+        //f
+      }
+    }
   }
 
   // Override implicit object CSVReader.open uses & change delimiter:
