@@ -16,9 +16,8 @@ import com.github.tototoshi.csv._
 import argonaut._, Argonaut._
 
 // ABAGAIL dependencies:
-import dist.DiscreteDependencyTree
-import dist.DiscreteUniformDistribution
-import dist.Distribution
+import dist.{DiscreteDependencyTree, DiscretePermutationDistribution,
+  DiscreteUniformDistribution, Distribution}
 import func.nn.activation._
 import func.nn.backprop._
 import opt._
@@ -45,7 +44,8 @@ object RandomizedOptimization {
     val full = true
     //steelFaults(full)
     //letterRecognition(full)
-    knapsackTest()
+    //knapsackTest()
+    travelingSalesmanTest()
   }
 
     // Run everything for the steel faults classification problem.
@@ -182,9 +182,9 @@ object RandomizedOptimization {
 
     val algos = List(
       ("RHC", 3000, () => new RandomizedHillClimbing(hcp)),
-      ("SA, 1e10 & 0.99", 3000, () => new SimulatedAnnealing(1e10, .99, hcp)),
+      ("SA, 1e3 & 0.99", 3000, () => new SimulatedAnnealing(1e3, .99, hcp)),
       ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
-      ("MIMIC, 200, 100", 2000, () => {
+      ("MIMIC, 200, 100", 1000, () => {
         val df = new DiscreteDependencyTree(.1, ranges)
         val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
         new MIMIC(200, 100, pop)
@@ -193,6 +193,38 @@ object RandomizedOptimization {
     // (Name, iters, algorithm)
 
     runOptimizationTestMatrix("knapsack", "knapsack01.json", 20, ef, algos)
+  }
+
+  def travelingSalesmanTest()
+  {
+    // Number of points:
+    val n = 50
+    val r = new scala.util.Random()
+    val points = Array.tabulate[Double](n, 2) { (_,_) => r.nextDouble }
+
+    val ef = new TravelingSalesmanRouteEvaluationFunction(points)
+    val dpd = new DiscretePermutationDistribution(n)
+    val nf = new SwapNeighbor()
+    val mf = new SwapMutation()
+    val cf = new TravelingSalesmanCrossOver(ef)
+    val hcp = new GenericHillClimbingProblem(ef, dpd, nf)
+    val gap = new GenericGeneticAlgorithmProblem(ef, dpd, mf, cf)
+
+    val ranges = Array.fill[Int](n)(n)
+
+    val algos = List(
+      ("RHC", 10000, () => new RandomizedHillClimbing(hcp)),
+      ("SA, 1e12 & 0.99", 20000, () => new SimulatedAnnealing(1e12, 0.95, hcp)),
+      ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
+      ("MIMIC, 200, 100", 1000, () => {
+        val df = new DiscreteDependencyTree(0.1, ranges)
+        val odd = new DiscreteUniformDistribution(ranges)
+        val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+        new MIMIC(200, 100, pop)
+      })
+    ) : List[(String, Int, () => OptimizationAlgorithm)]
+
+    runOptimizationTestMatrix("tsp", "tsp01.json", 6, ef, algos)
   }
 
   // Run an entire matrix of neural network training tests.
@@ -307,7 +339,7 @@ object RandomizedOptimization {
             algo.train()
             if (iter % 250 == 0) {
               val opt = ef.value(algo.getOptimal())
-              println(f"$name, $algoName, $iter/$iters: $opt")
+              println(f"$name, $algoName, run $run/$numRuns, $iter/$iters: $opt")
             }
             if (iter % 10 == 0) {
               val opt = ef.value(algo.getOptimal())
@@ -331,7 +363,7 @@ object RandomizedOptimization {
 
     val algoList = algos.map(_._1)
     val date = Calendar.getInstance().getTime()
-    val testId = f"$name, started on $date, algorithms: $algoList"
+    val testId = f"$name, started on $date, runs: $numRuns, algorithms: $algoList"
     val writer = new PrintWriter(new File(filename))
     writeJsonHeader(writer, testId)
 
