@@ -42,9 +42,10 @@ object RandomizedOptimization {
     // If 'true', then use the full datasets; if false, then greatly
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
-    val full = false
-    steelFaults(full)
-    letterRecognition(full)
+    val full = true
+    //steelFaults(full)
+    //letterRecognition(full)
+    knapsackTest()
   }
 
     // Run everything for the steel faults classification problem.
@@ -54,7 +55,6 @@ object RandomizedOptimization {
     // Input & output filenames
     // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn-dummp.json"
     
     // --------------------------------------------------------------------
     // Data loading and conditioning
@@ -80,29 +80,43 @@ object RandomizedOptimization {
     // T0, Tf = T0*cool^n, Tf/T0 = cool^n, cool = (Tf/T0)^(1/n).
     // --------------------------------------------------------------------
 
-    val algos = List(
-      //("RHC", x => new RandomizedHillClimbing(x))
-      ("GA, 320, 224, 96", x => new StandardGeneticAlgorithm(320, 224, 96, x)),
-      ("GA, 320, 224, 32", x => new StandardGeneticAlgorithm(320, 224, 32, x)),
-      ("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
-      ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x))
-      //("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
-      //("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
-      //("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x))
-      //("SA, 1e12 & 0.90", x => new SimulatedAnnealing(1e11, 0.95, x)),
-      /*("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
-      ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
-      ("GA, 120, 84, 12", x => new StandardGeneticAlgorithm(120, 84, 12, x)),
-      ("GA, 120, 84, 36", x => new StandardGeneticAlgorithm(120, 84, 36, x))*/
-      //("GA, 250, 225, 75", x => new StandardGeneticAlgorithm(250, 225, 75, x)),
-      //("GA, 500, 450, 150", x => new StandardGeneticAlgorithm(500, 450, 150, x))
-    ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+    {
+      val algos = List(
+        ("RHC", x => new RandomizedHillClimbing(x)),
+        ("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
+        ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
+        ("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x)),
+        ("SA, 1e11 & 0.95", x => new SimulatedAnnealing(1e11, 0.95, x)),
+        ("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e10, 0.95, x)),
+        ("SA, 1e9 & 0.95", x => new SimulatedAnnealing(1e9, 0.95, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
-    val split = 0.75
-    val iters = if (full) 10000 else 500
-    val runs = 1
-    val nodeList = List(10)
-    runTestMatrix("faults", faultsOutput, split, nodeList, runs, iters, faults, algos)
+      val split = 0.75
+      val iters = if (full) 50000 else 500
+      val runs = 8
+      val nodeList = List(10, 20, 30)
+      runNeuralNetTestMatrix("faults", "faults-nn20.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
+    
+    {
+      val algos = List(
+        //("RHC", x => new RandomizedHillClimbing(x))
+        ("GA, 200, 100, 20", x => new StandardGeneticAlgorithm(200, 100, 20, x)),
+        ("GA, 200, 100, 60", x => new StandardGeneticAlgorithm(200, 100, 60, x)),
+        ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
+        ("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
+        ("GA, 200, 180, 20", x => new StandardGeneticAlgorithm(200, 180, 20, x)),
+        ("GA, 200, 180, 60", x => new StandardGeneticAlgorithm(200, 180, 60, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+      val split = 0.75
+      val iters = if (full) 20000 else 500
+      val runs = 1
+      val nodeList = List(10, 20)
+      runNeuralNetTestMatrix("faults", "faults-nn19.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
   }
 
   // Run everything for the steel letter recognition problem.
@@ -146,7 +160,54 @@ object RandomizedOptimization {
     val iters = if (full) 20000 else 500
     val runs = 1
     val nodeList = List(10, 20)
-    runTestMatrix("letters", lettersOutput, split, nodeList, runs, iters, letters, algos)
+    runNeuralNetTestMatrix("letters", lettersOutput, split, nodeList,
+      runs, iters, letters, algos)
+  }
+
+  def knapsackTest()
+  {
+    // So far, this is a Scala translation of
+    // ABAGAIL/src/opt/test/KnapsackTest.java
+    val numItems       : Int    = 40
+    val copiesEach     : Int    = 4
+    val maxWeight      : Int    = 50
+    val maxVolume      : Int    = 50
+    val knapsackVolume : Double = maxVolume * numItems * copiesEach * 0.4
+
+    val r = new scala.util.Random()
+    val copies = Array.fill[Int](numItems)(copiesEach)
+    val weights = (1 to numItems).map( _ => r.nextDouble * maxWeight).toArray
+    val volumes = (1 to numItems).map( _ => r.nextDouble * maxVolume).toArray
+    val ranges = Array.fill[Int](numItems)(copiesEach + 1)
+    val ef = new KnapsackEvaluationFunction(weights, volumes, knapsackVolume, copies)
+    val odd = new DiscreteUniformDistribution(ranges)
+    val nf = new DiscreteChangeOneNeighbor(ranges)
+    val mf = new DiscreteChangeOneMutation(ranges)
+    val cf = new UniformCrossOver()
+    val df = new DiscreteDependencyTree(.1, ranges)
+    val hcp = new GenericHillClimbingProblem(ef, odd, nf)
+    val gap = new GenericGeneticAlgorithmProblem(ef, odd, mf, cf)
+    val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+
+    val rhc = new RandomizedHillClimbing(hcp)
+    val fit = new FixedIterationTrainer(rhc, 200)
+    fit.train()
+    println(ef.value(rhc.getOptimal()))
+
+    val sa = new SimulatedAnnealing(1e10, .99, hcp)
+    val fit2 = new FixedIterationTrainer(sa, 200000)
+    fit2.train()
+    println(ef.value(sa.getOptimal()))
+
+    val ga = new StandardGeneticAlgorithm(200, 150, 25, gap)
+    val fit3 = new FixedIterationTrainer(ga, 1000)
+    fit3.train()
+    println(ef.value(ga.getOptimal()))
+
+    val mimic = new MIMIC(200, 100, pop)
+    val fit4 = new FixedIterationTrainer(mimic, 1000)
+    fit4.train()
+    println(ef.value(mimic.getOptimal()))
   }
 
   // Run an entire matrix of tests.
@@ -158,7 +219,7 @@ object RandomizedOptimization {
   // iters: Number of iterations to run
   // data: Dataset to use
   // algos: List of names & algorithms (by way of OptimizationAlgorithm)
-  def runTestMatrix(
+  def runNeuralNetTestMatrix(
     name: String,
     filename: String,
     split: Double,
