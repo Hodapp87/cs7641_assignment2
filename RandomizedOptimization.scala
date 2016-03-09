@@ -42,7 +42,7 @@ object RandomizedOptimization {
     // If 'true', then use the full datasets; if false, then greatly
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
-    val full = false;
+    val full = false
     steelFaults(full)
     letterRecognition(full)
   }
@@ -54,7 +54,7 @@ object RandomizedOptimization {
     // Input & output filenames
     // --------------------------------------------------------------------
     val faultsFile = "Faults.NNA"
-    val faultsOutput = "faults-nn18.json"
+    val faultsOutput = "faults-nn-dummp.json"
     
     // --------------------------------------------------------------------
     // Data loading and conditioning
@@ -81,7 +81,11 @@ object RandomizedOptimization {
     // --------------------------------------------------------------------
 
     val algos = List(
-      ("RHC", x => new RandomizedHillClimbing(x))
+      //("RHC", x => new RandomizedHillClimbing(x))
+      ("GA, 320, 224, 96", x => new StandardGeneticAlgorithm(320, 224, 96, x)),
+      ("GA, 320, 224, 32", x => new StandardGeneticAlgorithm(320, 224, 32, x)),
+      ("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x)),
+      ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x))
       //("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
       //("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
       //("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x))
@@ -95,9 +99,9 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
-    val iters = if (full) 50000 else 500
+    val iters = if (full) 10000 else 500
     val runs = 1
-    val nodeList = List(10, 20, 30)
+    val nodeList = List(10)
     runTestMatrix("faults", faultsOutput, split, nodeList, runs, iters, faults, algos)
   }
 
@@ -139,9 +143,9 @@ object RandomizedOptimization {
     ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
     val split = 0.75
-    val iters = if (full) 50000 else 500
+    val iters = if (full) 20000 else 500
     val runs = 1
-    val nodeList = List(10, 20, 30)
+    val nodeList = List(10, 20)
     runTestMatrix("letters", lettersOutput, split, nodeList, runs, iters, letters, algos)
   }
 
@@ -205,8 +209,9 @@ object RandomizedOptimization {
 
     var done = 0
     var failed = 0
-    results.map { fut =>
-      fut onSuccess { case records =>
+    // This Future returns when all either have written or failed:
+    val allWritten = Future.sequence (results.map { fut =>
+      val written = fut.map { records =>
         writeJsonRecords(writer, records)
         val numRecs = records.size
         val numResults = results.size
@@ -214,16 +219,18 @@ object RandomizedOptimization {
         println(s"Wrote $numRecs records")
         println(s"$done done, $failed failed, of $numResults.")
       }
-      fut onFailure { case t =>
+      written onFailure { case t =>
         done = done + 1
         failed = failed + 1
         val numResults = results.size
         println("Error with result: " + t.getMessage)
         println(s"$done done, $failed failed, of $numResults.")
       }
-    }
+      written
+    })
 
-    Await.result(Future.sequence(results), Duration.Inf)
+    // Only once all others are done (including writing), close the file:
+    Await.result(allWritten, Duration.Inf)
     writeJsonEnd(writer)
     writer.close()
   }
@@ -315,7 +322,7 @@ object RandomizedOptimization {
       opt.train()
       val w = opt.getOptimal().getData()
       net.setWeights(w)
-      if (i % 500 == 0) println(s"$i/$iters...")
+      if (i % 100 == 0) println(s"$i/$iters...")
       if (i % 10 == 0) Some((i, net.getWeights)) else None
     }.toList
   }
