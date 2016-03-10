@@ -213,10 +213,10 @@ object RandomizedOptimization {
     val ranges = Array.fill[Int](n)(n)
 
     val algos = List(
-      ("RHC", 10000, () => new RandomizedHillClimbing(hcp)),
-      ("SA, 1e12 & 0.99", 20000, () => new SimulatedAnnealing(1e12, 0.95, hcp)),
+      ("RHC", 20000, () => new RandomizedHillClimbing(hcp)),
+      ("SA, 1e10 & 0.95", 20000, () => new SimulatedAnnealing(1e8, 0.95, hcp)),
       ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
-      ("MIMIC, 200, 100", 1000, () => {
+      ("MIMIC, 200, 100", 2000, () => {
         val df = new DiscreteDependencyTree(0.1, ranges)
         val odd = new DiscreteUniformDistribution(ranges)
         val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
