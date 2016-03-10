@@ -10,13 +10,13 @@
 library(jsonlite);
 library(ggplot2);
 
-jsonDump <- fromJSON("faults-nn19.json");
+jsonDump <- fromJSON("faults-nn20.json");
 data <- jsonDump$data
 ## data <- fromJSON("letters-nn-normed2.json");
 ## This decimates the plot, but I'm not sure if it does it well (it
 ## won't do it per-test):
-## data <- data[data$name == "SA, 1e11 & 0.95" | data$name == "RHC",]
-## data <- data[data$hiddenNodes == 20,]
+data <- data[data$name == "SA, 1e11 & 0.99" | data$name == "RHC",]
+data <- data[data$hiddenNodes == 10,]
 skip <- 50
 data10 <- data[seq(1,nrow(data),by=skip),]
 
@@ -56,11 +56,13 @@ ggplot(data = dataAgg2,
 
 
 
+
+
 #     geom_ribbon(aes(ymin=
 
-jsonDump <- fromJSON("knapsack01.json");
+jsonDump <- fromJSON("tsp01.json");
 data <- jsonDump$data
-data <- data[data$iter < 3000,]
+#data <- data[data$iter < 5000,]
 
 dataAgg <- aggregate(. ~ iter + name,
                      subset(data, select=c(value, iter, name)),
@@ -77,9 +79,9 @@ dataAgg2 <- data.frame(mean  = dataAgg$value,
                        name  = dataAgg$name);
 
 ggplot(data = dataAgg2,
-       aes(x=iter, y=mean, group=interaction(name))) +
+       aes(x=iter, y=1 / mean, group=interaction(name))) +
     geom_line(aes(colour=interaction(name))) +
-    geom_ribbon(aes(ymin=mean - stdev, ymax = mean + stdev, fill=interaction(name), alpha = 0.1)) +
+    geom_ribbon(aes(ymin=1 / (mean - stdev), ymax = 1 / (mean + stdev), fill=interaction(name), alpha = 0.1)) +
     xlab("Iterations") +
-    ylab("Error (ratio of incorrect classification)") +
+    ylab("Knapsack weight") +
     ggtitle(jsonDump$testId);
