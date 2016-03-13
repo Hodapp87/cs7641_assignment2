@@ -55,70 +55,6 @@ contPeaksTable <- function(t, digits) {
     return(fx)
 }
 
-jsonDump <- fromJSON("faults-nn20.json");
-data <- jsonDump$data
-## data <- fromJSON("letters-nn-normed2.json");
-## This decimates the plot, but I'm not sure if it does it well (it
-## won't do it per-test):
-data <- data[data$name == "SA, 1e11 & 0.99" | data$name == "RHC",]
-data <- data[data$hiddenNodes == 10,]
-skip <- 50
-data10 <- data[seq(1,nrow(data),by=skip),]
-
-dataAgg <- aggregate(
-    . ~ hiddenNodes + iter + name,
-    subset(data10, select=c(testErr, trainErr, hiddenNodes, iter, name)),
-    mean);
-
-dataStdev <- aggregate(
-    . ~ hiddenNodes + iter + name,
-    subset(data10, select=c(testErr, trainErr, hiddenNodes, iter, name)),
-    sd);
-
-## Turn training error & testing error into separate entries:
-dataTrainErr <- data.frame(meanErr     = dataAgg$trainErr,
-                           stdevErr    = dataStdev$trainErr,
-                           iter        = dataAgg$iter,
-                           hiddenNodes = dataAgg$hiddenNodes,
-                           name        = dataAgg$name,
-                           stage       = "Train");
-dataTestErr <- data.frame(meanErr     = dataAgg$testErr,
-                          stdevErr    = dataStdev$testErr,
-                          iter        = dataAgg$iter,
-                          hiddenNodes = dataAgg$hiddenNodes,
-                          name        = dataAgg$name,
-                          stage       = "Test");
-dataAgg2 = rbind(dataTrainErr, dataTestErr);
-dataAgg2["Hidden nodes"] <- sprintf("%d", dataAgg2$hiddenNodes);
-
-ggplot(data = dataAgg2,
-       aes(x=iter, y=meanErr, group=interaction(stage, name, hiddenNodes))) +
-    geom_line(aes(linetype=stage, colour=interaction(name, hiddenNodes))) +
-    geom_ribbon(aes(ymin=meanErr - stdevErr, ymax = meanErr + stdevErr, fill=interaction(name, hiddenNodes), alpha = 0.0)) +
-    xlab("Iterations") +
-    ylab("Error (ratio of incorrect classification)") +
-    ggtitle(jsonDump$testId);
-
-
-
-
-
-#     geom_ribbon(aes(ymin=
-
-jsonDump <- fromJSON("knapsack01.json");
-data <- jsonDump$data
-data <- data[data$iter < 1500,]
-
-knapsack <- combineOptFrame(data)
-
-ggplot(data = knapsack,
-       aes(x=iter, y=mean, group=name)) +
-    geom_line(aes(colour=name)) +
-    geom_ribbon(aes(ymin=(mean - stdev), ymax = (mean + stdev), color=name, fill=name), linetype=2, alpha = 0.3) +
-    xlab("Iterations") +
-    ylab("Knapsack weight") +
-    ggtitle(jsonDump$testId);
-
 ## Given a data frame 'data' read in from a JSON file produced by the
 ## Scala code for neural network training, perform some amount of
 ## decimation and aggregation, and split the training and testing
@@ -167,29 +103,21 @@ combineOptFrame <- function(data, skip = 1) {
     return(data2);
 }
 
-json16 <- fromJSON("faults-nn16.json");
-json19 <- fromJSON("faults-nn19.json");
-json20 <- fromJSON("faults-nn20.json");
-
-data <- json20$data
-data <- data[data$name == "RHC" | data$name == "SA, 1e10 & 0.95",]
-data <- data[data$hiddenNodes == 20,]
-faults20 <- combineNnFrame(data, 20);
-
-data <- json16$data
-## data <- data[data$name == "GA, 200, 140, 60",]
-## data <- data[data$hiddenNodes == 20,]
-faults16 <- combineNnFrame(data, 40);
-
-ggplot(data = faults16,
-       aes(x=iter, y=meanErr, group=interaction(stage, name, hiddenNodes))) +
-    geom_line(aes(linetype=stage, colour=interaction(name, hiddenNodes))) +
-    xlab("Iterations") +
-    ylab("Error (ratio of incorrect classification)") +
-    ggtitle(jsonDump$testId);
-
-    geom_ribbon(aes(ymin=meanErr - stdevErr, ymax = meanErr + stdevErr, fill=interaction(name, hiddenNodes), colour=interaction(name, hiddenNodes)), linetype=2, alpha = 0.1) +
-ggplot(data = faults20,
-
-
-
+## This is a wrapper around fromJSON that only loads from the JSON if
+## an identically-named .Rda file doesn't exist, or if the 2nd
+## argument is true.  If such an .Rda does exist, data is loaded from
+## this instead; if not, 
+fromJSONcached <- function(jsonFilename, reload = FALSE) {
+    ## Attempt to remove the .json extension and add .Rda:
+    rdaName <- paste(gsub(".json$", "", jsonFilename), ".Rda", sep="")
+    if (file.exists(rdaName) & !reload) {
+        return(local({
+            load(rdaName);
+            return(savedJsonData);
+        }))
+    } else {
+        savedJsonData <- fromJSON(jsonFilename)
+        save(savedJsonData, file = rdaName)
+        return(savedJsonData)
+    }
+}

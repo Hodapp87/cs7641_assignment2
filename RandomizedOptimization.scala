@@ -3,8 +3,12 @@
 // CS7641, Machine Learning, Spring 2016
 // Assignment 2, Randomized Optimization (2016-03-13)
 
-// Before I forget:
+// To build without formatted logs (for piping or M-x compile):
 // sbt -Dsbt.log.noformat=true compile
+
+// The functionality for counting function calls only works when
+// invoked with: -Dscala.concurrent.context.numThreads=1
+// -Dscala.concurrent.context.maxThreads=1
 
 // Java dependencies:
 import java.io._
@@ -42,10 +46,12 @@ object RandomizedOptimization {
     // reduce them so that we don't blow up Travis when committing,
     // but still test the same basic code paths.
     val full = true
+
     //steelFaults(full)
     //letterRecognition(full)
     //knapsackTest()
-    travelingSalesmanTest()
+    //travelingSalesmanTest()
+    //continuousPeaksTest()
   }
 
     // Run everything for the steel faults classification problem.
@@ -83,6 +89,60 @@ object RandomizedOptimization {
     {
       val algos = List(
         ("RHC", x => new RandomizedHillClimbing(x)),
+        ("SA, 1e2 & 0.9999", x => new SimulatedAnnealing(1e2, 0.9999, x)),
+        ("SA, 1e2 & 0.9995", x => new SimulatedAnnealing(1e2, 0.9995, x)),
+        ("SA, 1e2 & 0.999", x => new SimulatedAnnealing(1e2, 0.999, x)),
+        ("SA, 1e3 & 0.9999", x => new SimulatedAnnealing(1e3, 0.9999, x)),
+        ("SA, 1e3 & 0.9995", x => new SimulatedAnnealing(1e3, 0.9995, x)),
+        ("SA, 1e3 & 0.999", x => new SimulatedAnnealing(1e3, 0.999, x)),
+        ("SA, 1e4 & 0.9999", x => new SimulatedAnnealing(1e4, 0.9999, x)),
+        ("SA, 1e4 & 0.9995", x => new SimulatedAnnealing(1e4, 0.9995, x)),
+        ("SA, 1e4 & 0.999", x => new SimulatedAnnealing(1e4, 0.999, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+      val split = 0.75
+      val iters = if (full) 150000 else 500
+      val runs = 8
+      val nodeList = List(20)
+      runNeuralNetTestMatrix("faults", "faults-sa-tmp.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
+    
+    // This is to get a good measurement of stdev/min/max for many RHC
+    // runs:
+    {
+      val algos = List(
+        ("RHC", x => new RandomizedHillClimbing(x)),
+        ("SA, 1e10 & 0.95", x => new SimulatedAnnealing(1e11, 0.99, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+      val split = 0.75
+      val iters = if (full) 20000 else 500
+      val runs = 200
+      val nodeList = List(20)
+      runNeuralNetTestMatrix("faults", "faults-rhc-200runs.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
+
+    // This is just to establish timing for RHC & SA:
+    {
+      val algos = List(
+        ("RHC", x => new RandomizedHillClimbing(x)),
+        ("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+      val split = 0.75
+      val iters = if (full) 10000 else 500
+      val runs = 1
+      val nodeList = List(10, 20, 30)
+      runNeuralNetTestMatrix("faults", "faults-timing.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
+
+    // This will take awhile to run:
+    {
+      val algos = List(
+        ("RHC", x => new RandomizedHillClimbing(x)),
         ("SA, 1e11 & 0.99", x => new SimulatedAnnealing(1e11, 0.99, x)),
         ("SA, 1e10 & 0.99", x => new SimulatedAnnealing(1e10, 0.99, x)),
         ("SA, 1e9 & 0.99", x => new SimulatedAnnealing(1e9, 0.99, x)),
@@ -98,10 +158,31 @@ object RandomizedOptimization {
       runNeuralNetTestMatrix("faults", "faults-nn20.json", split, nodeList,
         runs, iters, faults, algos)
     }
-    
+
+    // This is to get a longer history for GA, and also to get timing
+    // information.  It took around 9 hours to run on my machine.
     {
       val algos = List(
         //("RHC", x => new RandomizedHillClimbing(x))
+        //("GA, 200, 100, 20", x => new StandardGeneticAlgorithm(200, 100, 20, x)),
+        //("GA, 200, 100, 60", x => new StandardGeneticAlgorithm(200, 100, 60, x)),
+        //("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
+        ("GA, 200, 140, 60", x => new StandardGeneticAlgorithm(200, 140, 60, x))
+        //("GA, 200, 180, 20", x => new StandardGeneticAlgorithm(200, 180, 20, x)),
+        //("GA, 200, 180, 60", x => new StandardGeneticAlgorithm(200, 180, 60, x))
+      ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
+
+      val split = 0.75
+      val iters = if (full) 50000 else 500
+      val runs = 1
+      val nodeList = List(20)
+      runNeuralNetTestMatrix("faults", "faults-ga-200-140-60.json", split, nodeList,
+        runs, iters, faults, algos)
+    }
+
+    {
+      val algos = List(
+        ("RHC", x => new RandomizedHillClimbing(x))
         ("GA, 200, 100, 20", x => new StandardGeneticAlgorithm(200, 100, 20, x)),
         ("GA, 200, 100, 60", x => new StandardGeneticAlgorithm(200, 100, 60, x)),
         ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
@@ -111,9 +192,9 @@ object RandomizedOptimization {
       ) : List[(String, NeuralNetworkOptimizationProblem => OptimizationAlgorithm)];
 
       val split = 0.75
-      val iters = if (full) 20000 else 500
+      val iters = if (full) 50000 else 500
       val runs = 1
-      val nodeList = List(10, 20)
+      val nodeList = List(20)
       runNeuralNetTestMatrix("faults", "faults-nn19.json", split, nodeList,
         runs, iters, faults, algos)
     }
@@ -155,6 +236,18 @@ object RandomizedOptimization {
       runs, iters, letters, algos)
   }
 
+  // Modified version of KnapsackEvaluationFunction which counts calls
+  class KnapsackEvalCount(w : Array[Double], v: Array[Double], maxV : Double,
+    maxC : Array[Int]) extends KnapsackEvaluationFunction(w, v, maxV, maxC)
+  {
+    var calls = 0
+    override def value(d : Instance) : Double =
+    {
+      calls += 1
+      super.value(d)
+    }
+  }
+
   def knapsackTest()
   {
     // So far, this is a Scala translation of
@@ -170,7 +263,7 @@ object RandomizedOptimization {
     val weights = (1 to numItems).map( _ => r.nextDouble * maxWeight).toArray
     val volumes = (1 to numItems).map( _ => r.nextDouble * maxVolume).toArray
     val ranges = Array.fill[Int](numItems)(copiesEach + 1)
-    val ef = new KnapsackEvaluationFunction(weights, volumes, knapsackVolume, copies)
+    val ef = new KnapsackEvalCount(weights, volumes, knapsackVolume, copies)
 
     val odd = new DiscreteUniformDistribution(ranges)
     val nf = new DiscreteChangeOneNeighbor(ranges)
@@ -180,19 +273,58 @@ object RandomizedOptimization {
     val mf = new DiscreteChangeOneMutation(ranges)
     val gap = new GenericGeneticAlgorithmProblem(ef, odd, mf, cf)
 
-    val algos = List(
-      ("RHC", 3000, () => new RandomizedHillClimbing(hcp)),
-      ("SA, 1e3 & 0.99", 3000, () => new SimulatedAnnealing(1e3, .99, hcp)),
-      ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
-      ("MIMIC, 200, 100", 1000, () => {
-        val df = new DiscreteDependencyTree(.1, ranges)
-        val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
-        new MIMIC(200, 100, pop)
-      })
-    ) : List[(String, Int, () => OptimizationAlgorithm)];
-    // (Name, iters, algorithm)
+    // This tests all the algorithms with the 'optimal' settings:
+    {
+      val algos = List(
+        ("RHC", 5000, () => new RandomizedHillClimbing(hcp)),
+        ("SA, 1e2 & 0.999", 5000, () => new SimulatedAnnealing(1e2, 0.999, hcp)),
+        ("GA, 200, 150, 25", 5000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
+        ("MIMIC, 200, 100", 5000, () => {
+          val df = new DiscreteDependencyTree(.1, ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(200, 100, pop)
+        })
+      ) : List[(String, Int, () => OptimizationAlgorithm)];
+      // (Name, iters, algorithm)
 
-    runOptimizationTestMatrix("knapsack", "knapsack01.json", 20, ef, algos)
+      runOptimizationTestMatrix("knapsack", "knapsack-all.json", 20, ef, algos)
+    }
+    
+    // This tests a variety of parameters and shows the tradeoff
+    // between better results, and faster results.
+    {
+      val i = 30000
+      val algos = List(
+        ("SA, 1e3 & 0.9997", i, () => new SimulatedAnnealing(1e3, .9997, hcp)),
+        ("SA, 1e4 & 0.9997", i, () => new SimulatedAnnealing(1e4, .9997, hcp)),
+        ("SA, 1e4 & 0.9995", i, () => new SimulatedAnnealing(1e4, .9995, hcp)),
+        ("SA, 1e2 & 0.999", i, () => new SimulatedAnnealing(1e2, .999, hcp)),
+        ("SA, 1e3 & 0.999", i, () => new SimulatedAnnealing(1e3, .999, hcp)),
+        ("SA, 1e4 & 0.999", i, () => new SimulatedAnnealing(1e4, .999, hcp)),
+        ("SA, 1e5 & 0.999", i, () => new SimulatedAnnealing(1e5, .999, hcp)),
+        ("SA, 1e6 & 0.999", i, () => new SimulatedAnnealing(1e6, .999, hcp)),
+        ("SA, 1e7 & 0.999", i, () => new SimulatedAnnealing(1e7, .999, hcp)),
+        ("SA, 1e8 & 0.999", i, () => new SimulatedAnnealing(1e8, .999, hcp)),
+        ("SA, 1e4 & 0.995", i, () => new SimulatedAnnealing(1e5, .995, hcp)),
+        ("SA, 1e4 & 0.99", i, () => new SimulatedAnnealing(1e5, .99, hcp))
+      ) : List[(String, Int, () => OptimizationAlgorithm)];
+      // (Name, iters, algorithm)
+
+      runOptimizationTestMatrix("knapsack", "knapsack-sa.json", 40, ef, algos)
+    }
+  }
+
+  // Modified version of TravelingSalesmanRouteEvaluationFunction
+  // which counts calls
+  class TspEvalCount(p : Array[Array[Double]]) extends
+      TravelingSalesmanRouteEvaluationFunction(p)
+  {
+    var calls = 0
+    override def value(d : Instance) : Double =
+    {
+      calls += 1
+      super.value(d)
+    }
   }
 
   def travelingSalesmanTest()
@@ -202,7 +334,7 @@ object RandomizedOptimization {
     val r = new scala.util.Random()
     val points = Array.tabulate[Double](n, 2) { (_,_) => r.nextDouble }
 
-    val ef = new TravelingSalesmanRouteEvaluationFunction(points)
+    val ef = new TspEvalCount(points)
     val dpd = new DiscretePermutationDistribution(n)
     val nf = new SwapNeighbor()
     val mf = new SwapMutation()
@@ -212,19 +344,112 @@ object RandomizedOptimization {
 
     val ranges = Array.fill[Int](n)(n)
 
-    val algos = List(
-      ("RHC", 20000, () => new RandomizedHillClimbing(hcp)),
-      ("SA, 1e10 & 0.95", 20000, () => new SimulatedAnnealing(1e8, 0.95, hcp)),
-      ("GA, 200, 150, 25", 2000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
-      ("MIMIC, 200, 100", 2000, () => {
-        val df = new DiscreteDependencyTree(0.1, ranges)
-        val odd = new DiscreteUniformDistribution(ranges)
-        val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
-        new MIMIC(200, 100, pop)
-      })
-    ) : List[(String, Int, () => OptimizationAlgorithm)]
+    // SA tuning
+    {
+      val i = 100000
+      val algos = List(
+        ("SA, 1e5 & 0.9997", i, () => new SimulatedAnnealing(1e5, .9997, hcp)),
+        ("SA, 1e6 & 0.9997", i, () => new SimulatedAnnealing(1e6, .9997, hcp)),
+        ("SA, 1e4 & 0.9995", i, () => new SimulatedAnnealing(1e4, .9995, hcp)),
+        ("SA, 1e2 & 0.999", i, () => new SimulatedAnnealing(1e2, .999, hcp)),
+        ("SA, 1e3 & 0.999", i, () => new SimulatedAnnealing(1e3, .999, hcp)),
+        ("SA, 1e4 & 0.999", i, () => new SimulatedAnnealing(1e4, .999, hcp)),
+        ("SA, 1e5 & 0.999", i, () => new SimulatedAnnealing(1e5, .999, hcp)),
+        ("SA, 1e6 & 0.999", i, () => new SimulatedAnnealing(1e6, .999, hcp)),
+        ("SA, 1e7 & 0.999", i, () => new SimulatedAnnealing(1e7, .999, hcp)),
+        ("SA, 1e8 & 0.999", i, () => new SimulatedAnnealing(1e8, .999, hcp)),
+        ("SA, 1e4 & 0.995", i, () => new SimulatedAnnealing(1e5, .995, hcp)),
+        ("SA, 1e4 & 0.99", i, () => new SimulatedAnnealing(1e5, .99, hcp))
+      ) : List[(String, Int, () => OptimizationAlgorithm)];
+      // (Name, iters, algorithm)
 
-    runOptimizationTestMatrix("tsp", "tsp01.json", 6, ef, algos)
+      runOptimizationTestMatrix("tsp", "tspSa.json", 10, ef, algos)
+    }
+
+    {
+      val algos = List(
+        ("RHC", 20000, () => new RandomizedHillClimbing(hcp)),
+        ("SA, 1e2 & 0.999", 20000, () => new SimulatedAnnealing(1e2, 0.999, hcp)),
+        ("GA, 200, 150, 25", 20000, () => new StandardGeneticAlgorithm(200, 150, 25, gap)),
+        ("MIMIC, 800, 200", 20000, () => {
+          val df = new DiscreteDependencyTree(0.1, ranges)
+          val odd = new DiscreteUniformDistribution(ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(800, 200, pop)
+        })
+      ) : List[(String, Int, () => OptimizationAlgorithm)]
+
+      runOptimizationTestMatrix("tsp", "tsp01.json", 8, ef, algos)
+    }
+
+    // MIMIC tuning
+    {
+      val algos = List(
+        ("RHC", 5000, () => new RandomizedHillClimbing(hcp)),
+        ("MIMIC, 800, 200", 5000, () => {
+          val df = new DiscreteDependencyTree(0.1, ranges)
+          val odd = new DiscreteUniformDistribution(ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(800, 200, pop)
+        }),
+        ("MIMIC, 800, 400", 5000, () => {
+          val df = new DiscreteDependencyTree(0.1, ranges)
+          val odd = new DiscreteUniformDistribution(ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(800, 400, pop)
+        }),
+        ("MIMIC, 400, 200", 5000, () => {
+          val df = new DiscreteDependencyTree(0.1, ranges)
+          val odd = new DiscreteUniformDistribution(ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(400, 200, pop)
+        })
+      ) : List[(String, Int, () => OptimizationAlgorithm)]
+
+      runOptimizationTestMatrix("tsp", "tspMimic.json", 4, ef, algos)
+    }
+  }
+
+  // Modified version of ContinuousPeaksEvaluationFunction which
+  // counts calls
+  class CpEvalCount(t : Int) extends ContinuousPeaksEvaluationFunction(t)
+  {
+    var calls = 0
+    override def value(d : Instance) : Double =
+    {
+      calls += 1
+      super.value(d)
+    }
+  }
+  
+  def continuousPeaksTest()
+  {
+    val n : Int = 60
+    val t : Int = n / 10
+    val ranges = Array.fill[Int](n)(2)
+
+    val ef = new CpEvalCount(t);
+    val nf = new DiscreteChangeOneNeighbor(ranges);
+    val mf = new DiscreteChangeOneMutation(ranges);
+    val cf = new SingleCrossOver();
+    val odd = new DiscreteUniformDistribution(ranges)
+    val hcp = new GenericHillClimbingProblem(ef, odd, nf);
+    val gap = new GenericGeneticAlgorithmProblem(ef, odd, mf, cf);
+
+    {
+      val algos = List(
+        ("RHC", 6000, () => new RandomizedHillClimbing(hcp)),
+        ("SA, 1e9 & 0.97", 6000, () => new SimulatedAnnealing(1e9, 0.97, hcp)),
+        ("GA, 200, 100, 10", 6000, () => new StandardGeneticAlgorithm(200, 100, 10, gap)),
+        ("MIMIC, 200, 20", 6000, () => {
+          val df = new DiscreteDependencyTree(0.1, ranges)
+          val pop = new GenericProbabilisticOptimizationProblem(ef, odd, df)
+          new MIMIC(200, 20, pop)
+        })
+      ) : List[(String, Int, () => OptimizationAlgorithm)]
+      runOptimizationTestMatrix("continuous_peaks", "cp01.json", 10, ef, algos)
+    }
+
   }
 
   // Run an entire matrix of neural network training tests.
@@ -259,6 +484,8 @@ object RandomizedOptimization {
       (1 to numRuns).flatMap { run =>
         hiddenNodeList.map { hiddenNodes =>
           val f: Future[List[ErrorResult]] = Future {
+            val t0 = System.nanoTime()
+
             println(s"Starting $name, $algoName, run $run, $hiddenNodes nodes")
             val nodeCfg = Array(inputs, hiddenNodes, outputs)
             val factory = new BackPropagationNetworkFactory()
@@ -271,8 +498,8 @@ object RandomizedOptimization {
               val testErr = nnBinaryError(test, testNet)
               ErrorResult(ctxt, trainErr, testErr)
             }
-            val t1 = System.nanoTime()
-            println(s"Finished $name, run $run, $hiddenNodes nodes")
+            val t1 = (System.nanoTime() - t0) / 1e9
+            println(f"Finished $name, $algoName, run $run ($t1%.2f seconds), $hiddenNodes nodes")
             r
           }
           f
@@ -336,18 +563,37 @@ object RandomizedOptimization {
 
           val t0 = System.nanoTime()
           val history = (1 to iters).flatMap { iter =>
+
+            // Train, but isolate just the calls required for training:
+            // (Yes, this is a kludge.)
+            ef match {
+              case ef2: KnapsackEvalCount => ef2.calls = 0
+              case ef2: TspEvalCount => ef2.calls = 0
+              case ef2: CpEvalCount => ef2.calls = 0
+              case _ => ()
+            }
+
             algo.train()
+
+            val calls = ef match {
+              case ef2: KnapsackEvalCount => ef2.calls
+              case ef2: TspEvalCount => ef2.calls
+              case ef2: CpEvalCount => ef2.calls
+              case _ => 0
+            }
+            
             if (iter % 250 == 0) {
               val opt = ef.value(algo.getOptimal())
-              println(f"$name, $algoName, run $run/$numRuns, $iter/$iters: $opt")
+              println(f"$name, $algoName, run $run/$numRuns, $iter/$iters, $calls calls: $opt")
             }
             if (iter % 10 == 0) {
               val opt = ef.value(algo.getOptimal())
-              Some(OptimizationResult(name, algoName, run, iter, opt))
+              Some(OptimizationResult(name, algoName, run, iter, calls, opt))
             } else None
           }
           val opt = ef.value(algo.getOptimal())
           val t1 = (System.nanoTime() - t0) / 1e9
+
           println(f"$name, $algoName, run $run, final ($t1%.2f seconds): $opt")
           history
         }
@@ -371,6 +617,7 @@ object RandomizedOptimization {
     var failed = 0
     // This Future returns when all either have written or failed:
     val allWritten = Future.sequence (results.map { fut =>
+
       val written = fut.map { records =>
         writeJsonOptimizationResult(writer, records)
         val numRecs = records.size
@@ -512,13 +759,14 @@ object RandomizedOptimization {
 
   // Class giving the optimization value in some context
   case class OptimizationResult(test: String, name: String, run: Int,
-      iter: Int, value: Double)
+      iter: Int, calls: Int, value: Double)
 
   implicit def OptimizationResultJson: EncodeJson[OptimizationResult] =
     EncodeJson((p: OptimizationResult) => {
       ("test"        := jString(p.test))  ->:
       ("name"        := jString(p.name))  ->:
       ("run"         := jNumber(p.run))   ->:
+      ("calls"       := jNumber(p.calls)) ->:
       ("iter"        := jNumber(p.iter))  ->:
       // TODO: Factor out all of the above.
       ("value"       := jNumber(p.value)) ->:
