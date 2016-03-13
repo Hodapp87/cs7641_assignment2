@@ -182,7 +182,7 @@ object RandomizedOptimization {
 
     {
       val algos = List(
-        ("RHC", x => new RandomizedHillClimbing(x))
+        ("RHC", x => new RandomizedHillClimbing(x)),
         ("GA, 200, 100, 20", x => new StandardGeneticAlgorithm(200, 100, 20, x)),
         ("GA, 200, 100, 60", x => new StandardGeneticAlgorithm(200, 100, 60, x)),
         ("GA, 200, 140, 20", x => new StandardGeneticAlgorithm(200, 140, 20, x)),
