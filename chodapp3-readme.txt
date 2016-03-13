@@ -5,8 +5,6 @@ Assignment 2: Randomized Optimization
 This assignment was written in Scala and R (only for plotting and some
 analysis).  It was run with R v3.2.3 on 64-bit Linux.
 
-(TODO: What versions of Scala & SBT?)
-
 The code (minus report & analysis code) is also available at:
 https://github.com/Hodapp87/cs7641_assignment2
 
@@ -16,6 +14,7 @@ Short procedure for generating everything:
 install.packages(c("ggplot2","jsonlite"));
 3. Run "sbt run" and wait awhile.  A long, long while.
 4. Run chodapp3-report.R to produce the plots and report.
+You will need LaTeX.
 
 Longer explanation:
 
@@ -50,8 +49,9 @@ https://archive.ics.uci.edu/ml/datasets/Steel+Plates+Faults and this
 is the source of the files 'Faults.NNA' and 'Faults27x7_var'.
 
 If you want to get a proper estimate of the number of function
-evaluations of different training methods, you will have to force SBT
-to be single-threaded (due to the kludge that I used in order to count
-evaluations).  Add the following after 'sbt' to do this:
--Dscala.concurrent.context.numThreads=1 -Dscala.concurrent.context.maxThreads=1
-
+evaluations of different training methods, you will have to force the
+code to run single-threaded (due to the kludge that I used in order to
+count evaluations).  In 'sbt run', add the following lines after 'sbt'
+to do this:
+-Dscala.concurrent.context.numThreads=1
+-Dscala.concurrent.context.maxThreads=1
